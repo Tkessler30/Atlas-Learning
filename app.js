@@ -1,23 +1,24 @@
-import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm';
-
 const SUPABASE_URL='https://fhjutbhyvaamzzsipwaa.supabase.co';
 const SUPABASE_KEY='sb_publishable_Ytbw_MTkDIhZP1KerZ4bAw_P7XPwFH_';
 
-let db;
+let db = null;
+window.addEventListener('error', (event) => {
+  const el = document.getElementById('authMessage');
+  if (el) el.textContent = 'Atlas error: ' + (event.message || 'unknown browser error');
+});
+
 try {
-  db = createClient(SUPABASE_URL, SUPABASE_KEY, {
-    auth: {
-      persistSession: true,
-      autoRefreshToken: true,
-      detectSessionInUrl: true
-    }
+  if (!window.supabase || !window.supabase.createClient) {
+    throw new Error('Supabase browser library did not load.');
+  }
+  db = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
+    auth: { persistSession:true, autoRefreshToken:true, detectSessionInUrl:true }
   });
 } catch (err) {
   document.addEventListener('DOMContentLoaded', () => {
     const el = document.getElementById('authMessage');
-    if (el) el.textContent = 'Atlas could not initialize authentication. Refresh the page and try again.';
+    if (el) el.textContent = 'Atlas authentication failed to initialize: ' + err.message;
   });
-  throw err;
 }
 
 let authMode='signup',user=null,profile=null,attempt=null,index=0,results={};
