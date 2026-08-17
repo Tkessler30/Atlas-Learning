@@ -1,16 +1,34 @@
 <!doctype html>
-<html lang="en">
-<head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>Atlas Learning</title>
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="styles.css" />
-</head>
-<body>
-  <div id="app"></div>
-  <script src="app.js"></script>
-</body>
-</html>
+<html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Atlas Learning v0.2</title><link rel="stylesheet" href="styles.css">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script></head>
+<body><main class="shell">
+<header><div><b>ATLAS LEARNING</b><h1>Catch up. Then get ahead.</h1></div><button id="logout" class="hidden">Log out</button></header>
+
+<section id="auth" class="card">
+<h2>Welcome to Atlas</h2><p>Create an account so your learning profile and progress are yours alone.</p>
+<div class="switch"><button id="signupTab" class="active">Sign up</button><button id="loginTab">Log in</button></div>
+<form id="authForm">
+<label id="nameRow">Name<input id="name"></label>
+<label>Email<input id="email" type="email" required></label>
+<label>Password<input id="password" type="password" minlength="6" required></label>
+<button class="primary" id="authButton">Create account</button><p id="authMessage"></p>
+</form></section>
+
+<section id="onboarding" class="card hidden"><small>STEP 1 OF 2</small><h2>Build your learning profile</h2>
+<form id="onboardingForm"><div class="grid">
+<label>Minutes per study day<select id="minutes"><option>10</option><option>15</option><option selected>30</option><option>45</option><option>60</option><option>90</option><option>120</option></select></label>
+<label>Days per week<select id="days"><option>3</option><option>4</option><option>5</option><option selected>6</option><option>7</option></select></label></div>
+<h3>Where would you like extra depth?</h3><div id="interests" class="chips"></div>
+<button class="primary">Save & start placement</button></form></section>
+
+<section id="placement" class="card hidden"><small>STEP 2 OF 2</small><h2>Placement Assessment</h2><p id="progress"></p><div id="question"></div></section>
+
+<section id="app" class="hidden">
+<nav><button class="active" data-page="today">Today</button><button data-page="map">Knowledge Map</button><button data-page="forecast">Forecast</button><button data-page="feedback">Feedback</button></nav>
+<div id="today" class="page card"><small>TODAY</small><h2><span id="dailyMinutes"></span>-minute plan</h2><p>Atlas will use reviews, weak areas, prerequisites and new learning to build your sessions.</p><div id="todayItems"></div><button class="primary" id="saveDemo">Complete demo session</button></div>
+<div id="map" class="page card hidden"><h2>Your Knowledge Map</h2><p>This starts from your assessment—not another user's baseline.</p><div id="mapItems"></div></div>
+<div id="forecast" class="page card hidden"><h2>Your Forecast</h2><div class="stats"><div><strong id="weekly"></strong><span>hours/week</span></div><div><strong id="yearly"></strong><span>hours/year</span></div></div><p id="forecastText"></p></div>
+<div id="feedback" class="page card hidden"><h2>Tester feedback</h2><select id="feedbackType"><option value="general">General</option><option value="confusing">Confusing</option><option value="boring">Boring</option><option value="too_easy">Too easy</option><option value="too_hard">Too hard</option><option value="broken">Broken</option><option value="loved_it">Loved it</option></select><textarea id="feedbackText" placeholder="Tell us what happened."></textarea><button class="primary" id="sendFeedback">Send feedback</button><p id="feedbackMessage"></p></div>
+</section></main><script src="app.js"></script></body></html>
