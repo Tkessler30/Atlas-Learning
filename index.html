@@ -2,13 +2,13 @@
 <html lang="en"><head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Atlas Learning v0.2</title><link rel="stylesheet" href="styles.css">
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script></head>
+</head>
 <body><main class="shell">
 <header><div><b>ATLAS LEARNING</b><h1>Catch up. Then get ahead.</h1></div><button id="logout" class="hidden">Log out</button></header>
 
 <section id="auth" class="card">
 <h2>Welcome to Atlas</h2><p>Create an account so your learning profile and progress are yours alone.</p>
-<div class="switch"><button id="signupTab" class="active">Sign up</button><button id="loginTab">Log in</button></div>
+<div class="switch"><button type="button" id="signupTab" class="active">Sign up</button><button type="button" id="loginTab">Log in</button></div>
 <form id="authForm">
 <label id="nameRow">Name<input id="name"></label>
 <label>Email<input id="email" type="email" required></label>
@@ -31,4 +31,4 @@
 <div id="map" class="page card hidden"><h2>Your Knowledge Map</h2><p>This starts from your assessment—not another user's baseline.</p><div id="mapItems"></div></div>
 <div id="forecast" class="page card hidden"><h2>Your Forecast</h2><div class="stats"><div><strong id="weekly"></strong><span>hours/week</span></div><div><strong id="yearly"></strong><span>hours/year</span></div></div><p id="forecastText"></p></div>
 <div id="feedback" class="page card hidden"><h2>Tester feedback</h2><select id="feedbackType"><option value="general">General</option><option value="confusing">Confusing</option><option value="boring">Boring</option><option value="too_easy">Too easy</option><option value="too_hard">Too hard</option><option value="broken">Broken</option><option value="loved_it">Loved it</option></select><textarea id="feedbackText" placeholder="Tell us what happened."></textarea><button class="primary" id="sendFeedback">Send feedback</button><p id="feedbackMessage"></p></div>
-</section></main><script src="app.js"></script></body></html>
+</section></main><script type="module" src="app.js"></script></body></html>

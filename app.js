@@ -1,6 +1,25 @@
-const URL='https://fhjutbhyvaamzzsipwaa.supabase.co';
-const KEY='sb_publishable_Ytbw_MTkDIhZP1KerZ4bAw_P7XPwFH_';
-const db=supabase.createClient(URL,KEY);
+import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm';
+
+const SUPABASE_URL='https://fhjutbhyvaamzzsipwaa.supabase.co';
+const SUPABASE_KEY='sb_publishable_Ytbw_MTkDIhZP1KerZ4bAw_P7XPwFH_';
+
+let db;
+try {
+  db = createClient(SUPABASE_URL, SUPABASE_KEY, {
+    auth: {
+      persistSession: true,
+      autoRefreshToken: true,
+      detectSessionInUrl: true
+    }
+  });
+} catch (err) {
+  document.addEventListener('DOMContentLoaded', () => {
+    const el = document.getElementById('authMessage');
+    if (el) el.textContent = 'Atlas could not initialize authentication. Refresh the page and try again.';
+  });
+  throw err;
+}
+
 let authMode='signup',user=null,profile=null,attempt=null,index=0,results={};
 const $=id=>document.getElementById(id);
 const views=['auth','onboarding','placement','app'];
@@ -22,7 +41,20 @@ const qs=[
 function show(v){views.forEach(x=>$(x).classList.toggle('hidden',x!==v))}
 function setAuthMode(m){authMode=m;$('nameRow').classList.toggle('hidden',m==='login');$('authButton').textContent=m==='login'?'Log in':'Create account';$('signupTab').classList.toggle('active',m==='signup');$('loginTab').classList.toggle('active',m==='login')}
 $('signupTab').onclick=()=>setAuthMode('signup');$('loginTab').onclick=()=>setAuthMode('login');
-$('authForm').onsubmit=async e=>{e.preventDefault();$('authMessage').textContent='Working…';let r;if(authMode==='signup')r=await db.auth.signUp({email:$('email').value,password:$('password').value,options:{data:{display_name:$('name').value},emailRedirectTo:location.href}});else r=await db.auth.signInWithPassword({email:$('email').value,password:$('password').value});if(r.error)return $('authMessage').textContent=r.error.message;if(!r.data.session)return $('authMessage').textContent='Check your email to confirm the account, then return here.';boot()};
+$('authForm').onsubmit=async e=>{e.preventDefault();$('authMessage').textContent='Working…';let r;if(authMode==='signup')r=await db.auth.signUp({
+  email:$('email').value,
+  password:$('password').value,
+  options:{
+    data:{display_name:$('name').value},
+    emailRedirectTo: location.origin + location.pathname
+  }
+});else r=await db.auth.signInWithPassword({email:$('email').value,password:$('password').value});if(r.error){$('authMessage').textContent=r.error.message;return}
+if(!r.data.session){
+  $('authMessage').textContent='Account created. Check your email for the confirmation link. If it does not arrive within a few minutes, we need to update the Supabase email redirect settings.';
+  return;
+}
+$('authMessage').textContent='Signed in.';
+boot()};
 $('logout').onclick=async()=>{await db.auth.signOut();location.reload()};
 const interestNames=['Science','HVAC Engineering','Business & Leadership','Accounting & Economics','History','Technology','Psychology','Government'];
 $('interests').innerHTML=interestNames.map(x=>`<button type="button" class="chip" data-v="${x}">${x}</button>`).join('');
