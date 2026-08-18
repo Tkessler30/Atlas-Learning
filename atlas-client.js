@@ -31,7 +31,9 @@ class AtlasClient{
   this.functions={invoke:(name,{body}={})=>this.invoke(name,body)};
   this.auth={
    signUp:(o)=>this.signUp(o),signInWithPassword:(o)=>this.signIn(o),
-   signOut:()=>this.signOut(),getUser:()=>this.getUser()
+   signOut:()=>this.signOut(),getUser:()=>this.getUser(),
+   resetPasswordForEmail:(email,o={})=>this.resetPasswordForEmail(email,o),
+   updateUser:(o)=>this.updateUser(o)
   };
   this.captureRedirect();
  }
@@ -53,8 +55,8 @@ class AtlasClient{
  from(t){return new AtlasQuery(this,t)}
  captureRedirect(){
   const hash=new URLSearchParams(location.hash.replace(/^#/,''));
-  const at=hash.get('access_token'),rt=hash.get('refresh_token');
-  if(at){this.saveSession({access_token:at,refresh_token:rt,expires_in:+hash.get('expires_in')||3600,token_type:hash.get('token_type')||'bearer'});history.replaceState({},document.title,location.pathname+location.search)}
+  const at=hash.get('access_token'),rt=hash.get('refresh_token'),type=hash.get('type');
+  if(at){this.saveSession({access_token:at,refresh_token:rt,expires_in:+hash.get('expires_in')||3600,token_type:hash.get('token_type')||'bearer'});if(type==='recovery')localStorage.setItem('atlas_recovery_pending','1');history.replaceState({},document.title,location.pathname+location.search)}
  }
  async signUp({email,password,options={}}){
   let redirect=options.emailRedirectTo||location.origin+location.pathname;
@@ -69,6 +71,18 @@ class AtlasClient{
   let d=await r.json().catch(()=>({}));
   if(!r.ok)return {data:{session:null,user:null},error:{message:d.error_description||d.msg||d.message||`Login failed (${r.status})`}};
   this.saveSession(d);return {data:{session:d,user:d.user||null},error:null};
+ }
+ async resetPasswordForEmail(email,{redirectTo}={}){
+  const redirect=redirectTo||location.origin+location.pathname;
+  let r=await fetch(`${this.url}/auth/v1/recover?redirect_to=${encodeURIComponent(redirect)}`,{method:'POST',headers:{apikey:this.key,'Content-Type':'application/json'},body:JSON.stringify({email})});
+  let d=await r.json().catch(()=>({}));if(!r.ok)return {data:null,error:{message:d.msg||d.message||`Recovery request failed (${r.status})`}};
+  return {data:d,error:null}
+ }
+ async updateUser({password}){
+  await this.ensureSession();let t=this.token();if(!t)return {data:null,error:{message:'Please sign in again.'}};
+  let r=await fetch(`${this.url}/auth/v1/user`,{method:'PUT',headers:{apikey:this.key,Authorization:'Bearer '+t,'Content-Type':'application/json'},body:JSON.stringify({password})});
+  let d=await r.json().catch(()=>({}));if(!r.ok)return {data:null,error:{message:d.msg||d.message||`Password update failed (${r.status})`}};
+  return {data:{user:d},error:null}
  }
  async getUser(){
   await this.ensureSession();let t=this.token();if(!t)return {data:{user:null},error:null};
