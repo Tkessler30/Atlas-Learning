@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="theme-color" content="#07101d">
-<title>Atlas Learning v0.4</title>
+<title>Atlas Learning v0.5</title>
 <link rel="stylesheet" href="styles.css">
 </head>
 <body>
@@ -60,7 +60,7 @@
 
 <section id="app" class="hidden">
 <nav class="main-nav">
-  <button class="active" data-page="today">Today</button><button data-page="portfolio">Portfolio</button><button data-page="map">Knowledge Map</button><button data-page="frontier">Frontier</button><button data-page="forecast">Forecast</button><button data-page="feedback">Feedback</button>
+  <button class="active" data-page="today">Today</button><button data-page="weekly">Weekly</button><button data-page="portfolio">Portfolio</button><button data-page="map">Knowledge Map</button><button data-page="frontier">Frontier</button><button data-page="discovery">Discovery</button><button data-page="forecast">Forecast</button><button data-page="feedback">Feedback</button>
 </nav>
 
 <section id="today" class="page">
@@ -68,6 +68,8 @@
   <div class="card"><div class="section-title"><div><div class="eyebrow">SESSION ALLOCATION</div><h3>Work each block</h3></div><span id="sessionDone" class="pill">0 / 4 complete</span></div><div id="todayItems" class="task-list"></div></div>
 </section>
 
+
+<section id="weekly" class="page hidden"><div class="card"><div class="eyebrow">WEEKLY DEPOSIT</div><h2>Build consistency without living in the app.</h2><div class="weekly-ring"><strong id="weeklyPct">0%</strong><span>goal complete</span></div><div class="progress-track"><div id="weeklyBar" class="progress-fill"></div></div><div class="stats3"><div><strong id="weeklyMinutes">0</strong><span>active minutes</span></div><div><strong id="weeklyConcepts">0</strong><span>concepts practiced</span></div><div><strong id="weeklyRetrievals">0</strong><span>retrievals</span></div></div><div id="weeklyStatement" class="frontier-card"></div></div></section>
 <section id="portfolio" class="page hidden">
   <div class="card"><div class="section-title"><div><div class="eyebrow">KNOWLEDGE PORTFOLIO</div><h2>Your intellectual balance sheet</h2></div><span id="portfolioIndex" class="big-pill"></span></div>
   <div class="portfolio-grid"><div class="metric-card"><span>Lifetime investment</span><strong id="lifetimeHours"></strong><small>focused hours</small></div><div class="metric-card"><span>Verified knowledge</span><strong id="verifiedIndex"></strong><small>evidence-weighted</small></div><div class="metric-card"><span>Map confidence</span><strong id="overallConfidence"></strong><small>how well Atlas knows you</small></div><div class="metric-card"><span>Domains sampled</span><strong id="domainsSampled"></strong><small>active knowledge domains</small></div></div>
@@ -83,6 +85,7 @@
   <div id="aiOutput" class="ai-output hidden"></div></div>
 </section>
 
+<section id="discovery" class="page hidden"><div class="card"><div class="eyebrow">DISCOVERY</div><h2>A short intellectual detour.</h2><p>Atlas uses discovery to probe unknown areas and form bridges — never an infinite feed.</p><div id="discoveryCard" class="frontier-card"></div><button id="newDiscovery" class="primary">Show me a connection</button></div></section>
 <section id="forecast" class="page hidden"><div class="card"><div class="eyebrow">COMPOUNDING KNOWLEDGE</div><h2>Your long-term trajectory</h2>
   <div class="stats3"><div><strong id="weekly"></strong><span>hours/week</span></div><div><strong id="yearly"></strong><span>hours/year</span></div><div><strong id="fiveYearHours"></strong><span>5-year hours</span></div></div>
   <p id="forecastText"></p><div id="forecastChart" class="forecast-chart"></div><div id="forecastMilestones" class="milestones"></div>
@@ -93,6 +96,6 @@
 <textarea id="feedbackText" placeholder="What worked? What broke? What should change?"></textarea><button class="primary" id="sendFeedback">Send feedback</button><p id="feedbackMessage"></p></div></section>
 </section>
 
-<div id="modal" class="modal hidden"><div class="modal-card"><button id="closeModal" class="modal-close">×</button><div id="modalBody"></div></div></div>
+<div id="celebration" class="celebration hidden"><div class="celebration-card"><div class="celebration-mark">✦</div><div class="eyebrow">KNOWLEDGE DEPOSIT COMPLETE</div><h2 id="celebrationTitle">Your portfolio grew.</h2><p id="celebrationText"></p><button id="closeCelebration" class="primary">See updated map</button></div></div><div id="modal" class="modal hidden"><div class="modal-card"><button id="closeModal" class="modal-close">×</button><div id="modalBody"></div></div></div>
 </main><script src="atlas-client.js"></script>
 <script src="app.js"></script></body></html>

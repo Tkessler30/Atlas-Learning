@@ -18,7 +18,7 @@ class AtlasQuery{
     Object.assign(h,this.headers);
     if(this.returning&&!h.Prefer)h.Prefer='return=representation';
     if(this.wantSingle)h.Accept='application/vnd.pgrst.object+json';
-    let r=await fetch(url,{method:this.method,headers:h,body:this.body?JSON.stringify(this.body):undefined});
+    await this.c.ensureSession(); Object.assign(h,this.c.headers()); let r=await fetch(url,{method:this.method,headers:h,body:this.body?JSON.stringify(this.body):undefined});
     let text=await r.text(),data=null;
     try{data=text?JSON.parse(text):null}catch{}
     if(!r.ok)return {data:null,error:{message:data?.message||data?.msg||text||`HTTP ${r.status}`,code:data?.code}};
@@ -35,9 +35,20 @@ class AtlasClient{
   };
   this.captureRedirect();
  }
- token(){try{return JSON.parse(localStorage.getItem(this.storageKey)||'null')?.access_token||null}catch{return null}}
- saveSession(s){if(s?.access_token)localStorage.setItem(this.storageKey,JSON.stringify(s))}
+ session(){try{return JSON.parse(localStorage.getItem(this.storageKey)||'null')}catch{return null}}
+ token(){return this.session()?.access_token||null}
+ saveSession(s){if(s?.access_token){let expires_at=s.expires_at||Math.floor(Date.now()/1000)+(+s.expires_in||3600);localStorage.setItem(this.storageKey,JSON.stringify({...s,expires_at}))}}
  clearSession(){localStorage.removeItem(this.storageKey)}
+ async refreshSession(){
+  let s=this.session(),rt=s?.refresh_token;if(!rt)return false;
+  let r=await fetch(`${this.url}/auth/v1/token?grant_type=refresh_token`,{method:'POST',headers:{apikey:this.key,'Content-Type':'application/json'},body:JSON.stringify({refresh_token:rt})});
+  let d=await r.json().catch(()=>({}));if(!r.ok||!d.access_token){this.clearSession();return false}this.saveSession(d);return true
+ }
+ async ensureSession(){
+  let s=this.session();if(!s?.access_token)return false;
+  if((+s.expires_at||0)-Math.floor(Date.now()/1000)<90)return await this.refreshSession();
+  return true
+ }
  headers(){let h={'apikey':this.key,'Content-Type':'application/json'};let t=this.token();if(t)h.Authorization='Bearer '+t;return h}
  from(t){return new AtlasQuery(this,t)}
  captureRedirect(){
@@ -60,7 +71,7 @@ class AtlasClient{
   this.saveSession(d);return {data:{session:d,user:d.user||null},error:null};
  }
  async getUser(){
-  let t=this.token();if(!t)return {data:{user:null},error:null};
+  await this.ensureSession();let t=this.token();if(!t)return {data:{user:null},error:null};
   let r=await fetch(`${this.url}/auth/v1/user`,{headers:{apikey:this.key,Authorization:'Bearer '+t}});
   if(!r.ok){if(r.status===401)this.clearSession();return {data:{user:null},error:{message:'Session expired'}}}
   return {data:{user:await r.json()},error:null};
@@ -70,7 +81,7 @@ class AtlasClient{
   this.clearSession();return {error:null};
  }
  async invoke(name,body){
-  let t=this.token();
+  await this.ensureSession();let t=this.token();
   let r=await fetch(`${this.url}/functions/v1/${encodeURIComponent(name)}`,{method:'POST',headers:{apikey:this.key,'Content-Type':'application/json',...(t?{Authorization:'Bearer '+t}:{})},body:JSON.stringify(body||{})});
   let text=await r.text(),d=null;try{d=text?JSON.parse(text):null}catch{}
   if(!r.ok)return {data:null,error:{message:d?.error||d?.message||text||`Function failed (${r.status})`}};
