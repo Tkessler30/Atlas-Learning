@@ -9,7 +9,7 @@
 <body>
 <main class="shell">
 <header class="site-header">
-  <div><div class="brand">ATLAS LEARNING <span id="buildBadge" class="build-badge">v0.6.6</span></div><h1>Build your knowledge portfolio.</h1><p>Time is the deposit. Knowledge retained is the return.</p></div>
+  <div><div class="brand">ATLAS LEARNING <span id="buildBadge" class="build-badge">v0.6.9</span></div><h1>Build your knowledge portfolio.</h1><p>Time is the deposit. Knowledge retained is the return.</p></div>
   <button id="logout" class="ghost hidden">Log out</button>
 </header>
 
@@ -32,7 +32,7 @@
   <p>Atlas adapts to your schedule. Interests influence depth, while the core polymath map stays broad.</p>
   <form id="onboardingForm">
     <div class="grid2">
-      <label>Typical study time<select id="minutes"><option value="10">10 min/day</option><option value="15">15 min/day</option><option value="30">30 min/day</option><option value="45">45 min/day</option><option value="60">60 min/day</option><option value="90">90 min/day</option><option value="120">2 hr/day</option></select></label>
+      <label>Typical study time<select id="minutes"><option value="5">5 min/day</option><option value="10">10 min/day</option><option value="15">15 min/day</option><option value="30">30 min/day</option><option value="45">45 min/day</option><option value="60">60 min/day</option><option value="90">90 min/day</option><option value="120">2 hr/day</option></select></label>
       <label>Days per week<select id="days"><option>3</option><option>4</option><option>5</option><option>6</option><option>7</option></select></label>
     </div>
     <h3>What are you trying to get better at?</h3>
@@ -69,15 +69,16 @@
 
 <section id="app" class="hidden">
 <nav class="main-nav">
-  <button class="active" data-page="today">Today</button><button data-page="map">Knowledge Map</button><button data-page="frontier">Frontier</button><button data-page="discovery">Discovery</button><button data-page="explore">Explore</button><button data-page="portfolio">Portfolio</button><button data-page="weekly">Weekly</button><button data-page="insights">Insights</button><button data-page="forecast">Forecast</button><button data-page="account">Account</button><button data-page="feedback">Feedback</button>
+  <button class="active" data-page="today">Today</button><button data-page="map">Knowledge Map</button><button data-page="frontier">Deep Dive</button><button data-page="discovery">Discovery</button><button data-page="explore">Explore</button><button data-page="portfolio">Portfolio</button><button data-page="weekly">Weekly</button><button data-page="insights">Insights</button><button data-page="forecast">Forecast</button><button data-page="account">Account</button><button data-page="feedback">Feedback</button>
 </nav>
 <div id="systemStatus" class="status-banner hidden" role="status"></div>
 
 <section id="today" class="page">
   <div id="learnerSnapshot" class="card"></div>
   <div id="todayStreak" class="streak-card"></div>
-  <div class="card hero session-hero"><div><div class="eyebrow">TODAY'S GUIDED SESSION</div><h2><span id="dailyMinutes"></span>-minute session</h2><p id="todaySummary"></p><button id="startDailySession" class="primary session-start">Start today’s session</button><p id="sessionGoalLine" class="fineprint"></p></div><div class="deposit"><strong id="monthMinutes">0</strong><span>minutes invested this month</span></div></div>
-  <div class="card"><div class="section-title"><div><div class="eyebrow">TODAY'S ROUTE</div><h3>Focused learning path</h3></div><span id="sessionDone" class="pill">0 / 2 complete</span></div><div id="allocationSummary" class="track-sub"></div><div id="todayItems" class="task-list"></div></div>
+  <div class="card hero session-hero"><div><div class="eyebrow">TODAY'S GUIDED SESSION</div><h2><span id="dailyMinutes"></span>-minute session</h2><p id="todaySummary"></p><button id="startDailySession" class="primary session-start">Start today’s session</button><button id="deepDiveDaily" class="secondary session-deep-dive">Deep dive instead</button><p id="sessionGoalLine" class="fineprint"></p></div><div class="deposit"><strong id="monthMinutes">0</strong><span>minutes invested this month</span></div></div>
+  <div id="sessionArcCard" class="card session-arc-card"><div class="eyebrow">TODAY'S LEARNING ARC</div><h3 id="sessionArcTitle">Building today’s pattern…</h3><p id="sessionArcScenario"></p><div id="sessionArcConnection" class="notice"></div></div>
+  <div class="card"><div class="section-title"><div><div class="eyebrow">TODAY'S ROUTE</div><h3>One connected learning path</h3></div><span id="sessionDone" class="pill">0 complete</span></div><div id="allocationSummary" class="track-sub"></div><div id="todayItems" class="task-list"></div></div>
 </section>
 
 
@@ -91,10 +92,22 @@
 <section id="map" class="page hidden"><div class="card"><div class="eyebrow">KNOWLEDGE MAP</div><h2>Explore what you know</h2><p>Open any domain to see mastered concepts, shaky concepts, unknown territory, prerequisites, retention state, and your current frontier.</p><div id="mapItems"></div><div id="mapDetail" class="map-detail hidden"></div></div></section>
 
 <section id="frontier" class="page hidden">
-  <div class="card"><div class="eyebrow">ADAPTIVE FRONTIER</div><h2>Push beyond what you already know</h2><p>Atlas chooses concepts near your current frontier. The content engine can explain, challenge, or apply the concept at a targeted difficulty.</p>
-  <div id="frontierCard" class="frontier-card"></div>
-  <div class="row"><button class="primary aiAction" data-mode="lesson">Teach me</button><button class="secondary aiAction" data-mode="challenge">Push harder</button><button class="secondary aiAction" data-mode="application">Give me a real-world application</button></div>
-  <div id="aiOutput" class="ai-output hidden"></div></div>
+  <div class="card">
+    <div class="eyebrow">DEEP DIVE</div>
+    <h2>Choose a subject and go deeper.</h2>
+    <p>Deep Dive is the user-facing version of your adaptive frontier: Atlas finds the next useful concept inside a subject, then lets you learn it, stretch it, or apply it.</p>
+    <label class="deep-dive-picker">Subject
+      <select id="deepDiveSubject"></select>
+    </label>
+    <div id="frontierCard" class="frontier-card"></div>
+    <div class="row">
+      <button class="primary aiAction" data-mode="lesson">Teach this</button>
+      <button class="secondary aiAction" data-mode="challenge">Push harder</button>
+      <button class="secondary aiAction" data-mode="application">Apply it in the real world</button>
+    </div>
+    <p class="fineprint">Deep Dive is optional depth. Your guided daily session remains the balanced path that keeps your overall knowledge portfolio broad.</p>
+    <div id="aiOutput" class="ai-output hidden"></div>
+  </div>
 </section>
 
 <section id="discovery" class="page hidden">
@@ -166,7 +179,7 @@
     <button id="saveLearningGoal" class="secondary">Save learning goal</button>
     <h3>Learning schedule</h3>
     <div class="grid2">
-      <label>Typical study time<select id="accountMinutes"><option value="10">10 min/day</option><option value="15">15 min/day</option><option value="30">30 min/day</option><option value="45">45 min/day</option><option value="60">60 min/day</option><option value="90">90 min/day</option><option value="120">2 hr/day</option></select></label>
+      <label>Typical study time<select id="accountMinutes"><option value="5">5 min/day</option><option value="10">10 min/day</option><option value="15">15 min/day</option><option value="30">30 min/day</option><option value="45">45 min/day</option><option value="60">60 min/day</option><option value="90">90 min/day</option><option value="120">2 hr/day</option></select></label>
       <label>Days per week<select id="accountDays"><option>3</option><option>4</option><option>5</option><option>6</option><option>7</option></select></label>
     </div>
     <button id="saveAccountSchedule" class="secondary">Save schedule</button>

@@ -2,14 +2,14 @@ const URL='https://fhjutbhyvaamzzsipwaa.supabase.co';
 const KEY='sb_publishable_Ytbw_MTkDIhZP1KerZ4bAw_P7XPwFH_';
 const db=window.createAtlasClient(URL,KEY);
 const CORE_LESSONS=window.ATLAS_CORE_LESSONS||{};
-const ATLAS_VERSION='v0.6.6',ATLAS_BUILD='2026.08.18';
+const ATLAS_VERSION='v0.6.9',ATLAS_BUILD='2026.08.18';
 window.addEventListener('error',e=>{
   const msg='Atlas hit an unexpected screen error. Your saved progress is not erased.';
   const status=document.getElementById('systemStatus'),auth=document.getElementById('authMessage');
   if(status&&!status.classList.contains('hidden')||document.getElementById('app')&&!document.getElementById('app').classList.contains('hidden')){if(status){status.textContent=msg;status.classList.remove('hidden');status.classList.add('status-error')}}else if(auth)auth.textContent=msg;
 });
 const $=id=>document.getElementById(id);
-let authMode='signup',user=null,profile=null,subjects=[],concepts=[],states=[],sessions=[],masteries=[],interests=[],prereqs=[],events=[],attempt=null,round=1,qIndex=0,answers=[],roundQs=[],openIndex=0,todayDone=new Set(),frontierConcept=null,currentRoute=null,todayPlan=[],dailySessionComplete=false,guidedSessionActive=false,taskOpenedAt=0,sessionActiveSeconds=0,activityBySubject={},activityByConcept={},misconceptions=[],modalityPerf=[],curiosityQueue=[],learningObjects=[],connections=[],milestones=[],curatedMedia=[],activeLearningObject=null,assessmentBusy=false,progressCache={},activeDiscovery=null,discoverySeen=new Set(),prefetchInFlight=new Set(),coreLoadWarning='';
+let authMode='signup',user=null,profile=null,subjects=[],concepts=[],states=[],sessions=[],masteries=[],interests=[],prereqs=[],events=[],attempt=null,round=1,qIndex=0,answers=[],roundQs=[],openIndex=0,todayDone=new Set(),frontierConcept=null,currentRoute=null,deepDiveSubjectKey=null,todayPlan=[],dailySessionComplete=false,guidedSessionActive=false,taskOpenedAt=0,sessionActiveSeconds=0,activityBySubject={},activityByConcept={},misconceptions=[],modalityPerf=[],curiosityQueue=[],learningObjects=[],connections=[],milestones=[],curatedMedia=[],activeLearningObject=null,assessmentBusy=false,progressCache={},activeDiscovery=null,discoverySeen=new Set(),prefetchInFlight=new Set(),coreLoadWarning='',sessionArc=null,sessionMode='balanced';
 const VIEWS=['auth','onboarding','assessmentIntro','assessment','checkpoint','app'];
 const EXTRA=['Science','Health & Medicine','Trades & Construction','Business & Leadership','Accounting & Economics','Technology & AI','History & Geopolitics','Psychology & Philosophy','Arts & Culture'];
 
@@ -111,18 +111,34 @@ async function getProgressState(key){
  if(user){let r=await db.from('user_progress').select('*').eq('user_id',user.id).eq('progress_key',key).single();if(!r.error&&r.data?.state){progressCache[key]=r.data.state;return r.data.state}}
  progressCache[key]=local||null;return progressCache[key]
 }
-function dailyProgressKey(){return `daily_learning_v066_${localDayKey()}`}
+function dailyProgressKey(){return `daily_learning_v067_${localDayKey()}`}
+function legacyDailyProgressKey(){return `daily_learning_v066_${localDayKey()}`}
 async function saveDailyProgress(completed=dailySessionComplete){
  if(!user)return;
- await saveProgressState(dailyProgressKey(),{completed:!!completed,guidedSessionActive:!!guidedSessionActive,todayDone:[...todayDone],sessionActiveSeconds,plan:todayPlan.map(p=>({type:p.type,concept_key:p.route.c.key,diagnostic:!!p.route.diagnostic}))})
+ await saveProgressState(dailyProgressKey(),{plan_version:'v067',completed:!!completed,guidedSessionActive:!!guidedSessionActive,sessionMode,sessionArc,todayDone:[...todayDone],sessionActiveSeconds,plan:todayPlan.map(p=>({type:p.type,concept_key:p.route.c.key,diagnostic:!!p.route.diagnostic,session_role:p.session_role||null,estimated_minutes:p.estimated_minutes||null}))})
 }
 async function restoreDailyProgress(){
- let s=await getProgressState(dailyProgressKey());if(!s)return;
- dailySessionComplete=!!s.completed;guidedSessionActive=!!s.guidedSessionActive;todayDone=new Set(s.todayDone||[]);sessionActiveSeconds=+s.sessionActiveSeconds||0;
+ let s=await getProgressState(dailyProgressKey());
+ if(!s){let legacy=await getProgressState(legacyDailyProgressKey());if(legacy?.completed){dailySessionComplete=true;guidedSessionActive=false;todayDone=new Set(legacy.todayDone||[]);sessionActiveSeconds=+legacy.sessionActiveSeconds||0;return}return}
+ if(s.plan_version&&s.plan_version!=='v067'&&!s.completed)return;
+ dailySessionComplete=!!s.completed;guidedSessionActive=!!s.guidedSessionActive;sessionMode=s.sessionMode||'balanced';sessionArc=s.sessionArc||null;todayDone=new Set(s.todayDone||[]);sessionActiveSeconds=+s.sessionActiveSeconds||0;
  if(Array.isArray(s.plan)&&s.plan.length){
-  let restored=s.plan.map(x=>{let c=conceptByKey(x.concept_key);if(!c)return null;let mode=x.type==='gap'?'gap':x.type==='bridge'?'bridge':x.type==='review'?'review':'frontier',route=routeScore(c,mode);route.diagnostic=!!x.diagnostic;return {type:x.type,route}}).filter(Boolean);
+  let restored=s.plan.map(x=>{let c=conceptByKey(x.concept_key);if(!c)return null;let mode=x.type==='gap'?'gap':x.type==='bridge'?'bridge':x.type==='review'?'review':x.type==='synthesis'?'general':'frontier',route=routeScore(c,mode);if(x.type==='synthesis'&&route.score<-9000)route={c,score:0,reasons:['session synthesis'],e:subjectEvidence(c.subject_key),m:conceptMastery(c.key),diagnostic:false};route.diagnostic=!!x.diagnostic;return {type:x.type,route,session_role:x.session_role||null,estimated_minutes:+x.estimated_minutes||null}}).filter(Boolean);
   if(restored.length===s.plan.length)todayPlan=restored
  }
+}
+function sessionSummaryKey(){return `guided:${localDayKey()}`}
+async function persistSessionSummary(actual){
+ let row={user_id:user.id,session_key:sessionSummaryKey(),session_date:localDayKey(),planned_minutes:+profile.daily_minutes||30,actual_minutes:actual,session_type:'adaptive_v067_coherent',completed:true,completed_at:new Date().toISOString()};
+ let r=await db.from('study_sessions').upsert(row,{onConflict:'user_id,session_key'}).select().single();
+ if(r.error){await saveProgressState('pending_session_summary',{pending:true,row});return {ok:false,message:r.error.message}}
+ await saveProgressState('pending_session_summary',{pending:false,session_key:row.session_key});return {ok:true,data:r.data}
+}
+async function retryPendingSessionSummary(){
+ let p=await getProgressState('pending_session_summary');if(!p?.pending||!p.row)return false;
+ let r=await db.from('study_sessions').upsert(p.row,{onConflict:'user_id,session_key'}).select().single();
+ if(r.error)return false;
+ await saveProgressState('pending_session_summary',{pending:false,session_key:p.row.session_key});return true
 }
 
 async function assessmentLanding(){let r=await db.from('placement_attempts').select('*').eq('user_id',user.id).eq('status','in_progress').order('started_at',{ascending:false}).limit(1);let saved=r.data?.[0];$('resumeAssessment').classList.toggle('hidden',!saved);$('resumeAssessment').dataset.id=saved?.id||'';show('assessmentIntro')}
@@ -292,6 +308,7 @@ function bridgeSource(c){
 
 function goalTokens(){return String(profile?.learning_goal||'').toLowerCase().replace(/[^a-z0-9]+/g,' ').split(/\s+/).filter(w=>w.length>=4&&!['want','learn','better','understand','become','knowledge','broadly','about','more'].includes(w))}
 function goalBoost(c){let toks=goalTokens();if(!toks.length)return 0;let hay=`${getSubject(c.subject_key)?.name||''} ${c.name||''} ${c.description||''} ${c.learning_objective||''}`.toLowerCase(),hits=toks.filter(t=>hay.includes(t)).length;return Math.min(34,hits*12)}
+function weeklyCoverageBoost(c){let since=Date.now()-6*864e5,recent=events.filter(e=>new Date(e.created_at).getTime()>=since),total=recent.length;if(total<4)return 8;let n=recent.filter(e=>conceptByKey(e.concept_key)?.subject_key===c.subject_key).length,share=n/Math.max(1,total);if(n===0)return 18;if(share>.38)return -28;if(share>.28)return -12;return Math.max(0,10-n*2)}
 
 function routeScore(c,mode='general'){
  let e=subjectEvidence(c.subject_key),m=conceptMastery(c.key),score=0,reasons=[],level=+c.level||1,lowConfidence=!e.known||e.confidence<35;
@@ -344,52 +361,122 @@ function atlasTaughtConcept(key){
 function dueLearnedReviews(){return masteries.filter(m=>m.next_review_at&&new Date(m.next_review_at)<=new Date()&&atlasTaughtConcept(m.concept_key))}
 function completedAtlasLessons(){return learningObjects.filter(x=>x.completed_at&&!['review','probe'].includes(x.route_type)&&x.provider!=='atlas_fallback').length}
 function foundationTeachingCandidate(exclude=new Set()){
- let list=concepts.filter(c=>!exclude.has(c.key)&&(+c.level||1)<=2&&prereqs.filter(p=>p.concept_key===c.key).every(prereqSatisfied)).map(c=>({c,score:(30-(activityBySubject[c.subject_key]||0)*.25)+(interestKeys().has(c.subject_key)?8:0)+(CORE_LESSONS[c.key]?35:0)-recentCount(c.key,14)*18,reasons:['foundation lesson'],e:subjectEvidence(c.subject_key),m:conceptMastery(c.key),diagnostic:false})).sort((a,b)=>b.score-a.score);
+ let list=concepts.filter(c=>!exclude.has(c.key)&&(+c.level||1)<=2&&prereqs.filter(p=>p.concept_key===c.key).every(prereqSatisfied)).map(c=>({c,score:(30-(activityBySubject[c.subject_key]||0)*.25)+(interestKeys().has(c.subject_key)?8:0)+(CORE_LESSONS[c.key]?35:0)+teachingRampBonus(c)-recentCount(c.key,14)*18,reasons:['foundation lesson'],e:subjectEvidence(c.subject_key),m:conceptMastery(c.key),diagnostic:false})).sort((a,b)=>b.score-a.score);
  return list[0]||null
 }
-function sessionBlockCount(){let m=+profile?.daily_minutes||30;if(m<=15)return 1;if(m<=40)return 2;if(m<=60)return 3;return 4}
-function sessionAllocation(){
- let n=sessionBlockCount(),due=dueLearnedReviews().length,learned=completedAtlasLessons();
- if(n===1)return ['lesson'];
- if(n===2)return learned>=6&&due&&new Date().getDay()%3===0?['lesson','review']:['lesson','lesson'];
- if(n===3)return learned>=5&&due?['lesson','lesson','review']:['lesson','lesson','lesson'];
- return learned>=5&&due?['lesson','lesson','review','lesson']:['lesson','lesson','lesson','lesson']
+function sessionDesign(){
+ let m=+profile?.daily_minutes||30,due=dueLearnedReviews().length;
+ if(m<=7)return {lessons:1,synthesis:false,review:false,target:m};
+ if(m<=20)return {lessons:1,synthesis:true,review:false,target:m};
+ if(m<=40)return {lessons:2,synthesis:true,review:false,target:m};
+ if(m<=60)return {lessons:3,synthesis:true,review:!!due,target:m};
+ return {lessons:4,synthesis:true,review:!!due,target:m}
 }
+function sessionBlockCount(){let d=sessionDesign();return d.lessons+(d.synthesis?1:0)+(d.review?1:0)}
+function teachingRampBonus(c){
+ let taught=completedAtlasLessons();if(taught>=8)return 0;let e=subjectEvidence(c.subject_key),level=+c.level||1;
+ if(!e.known||e.confidence<35)return level<=2?22:-20;
+ let boundary=Math.max(1,+e.boundary||1),ideal=Math.max(1,Math.floor(boundary)-(taught<3?1:0));
+ if(taught<3&&level>Math.floor(boundary))return -65;
+ if(taught<6&&level>Math.ceil(boundary))return -40;
+ return Math.max(-28,32-12*Math.abs(level-ideal))
+}
+const ARC_PAIRS={
+ 'accounting|chemistry':{title:'Inside a battery manufacturer',scenario:'A battery plant is trying to increase output without creating unsafe heat or letting production costs get out of control.',roles:{chemistry:'Understand where heat and energy move inside the process.',accounting:'Translate production choices into costs, assets, margins, and financial tradeoffs.'}},
+ 'ai|chemistry':{title:'Keeping a battery pack safe',scenario:'A battery system produces heat while sensors and software try to identify when normal operation is turning into a safety risk.',roles:{chemistry:'Explain the energy and temperature behavior.',ai:'Use patterns in sensor data to detect and predict risk.'}},
+ 'ai|biology':{title:'Building a biological diagnostic system',scenario:'A health team wants to use biological signals to help classify risk without confusing correlation with biological mechanism.',roles:{biology:'Explain what the biological signal actually represents.',ai:'Turn measurements into a model while testing its limits.'}},
+ 'biology|computing':{title:'From cells to data',scenario:'A lab has biological measurements from many samples and needs a digital system that preserves what the biology means while organizing and analyzing the data.',roles:{biology:'Explain the mechanism generating the measurements.',computing:'Represent, process, and check the information reliably.'}},
+ 'accounting|economics':{title:'A manufacturer facing rising costs',scenario:'A small manufacturer is deciding whether to raise prices, change production, hire, or borrow while its input costs and customer demand are changing.',roles:{economics:'Explain the market forces changing demand, prices, and incentives.',accounting:'Show how those decisions appear in costs, cash, assets, liabilities, and profit.'}},
+ 'economics|finance':{title:'A borrowing and investment decision',scenario:'A household or business must decide whether a long-term investment is still worthwhile as interest rates, inflation, and expected returns change.',roles:{economics:'Explain the forces moving rates, inflation, and demand.',finance:'Turn those forces into a decision about cash flows, risk, and return.'}},
+ 'economics|government':{title:'A city responding to a downturn',scenario:'A city is facing weaker hiring and tax revenue and must decide whether spending, taxes, or borrowing should change.',roles:{economics:'Trace demand, employment, inflation, and tradeoffs.',government:'Explain which public institutions can act and what constraints they face.'}},
+ 'economics|history':{title:'Why an economy changes over time',scenario:'A society is going through a major technological or institutional shift that changes work, production, prices, and political choices.',roles:{history:'Follow the sequence of causes, institutions, and consequences.',economics:'Explain incentives, production, labor markets, and distribution.'}},
+ 'engineering|physics':{title:'Designing a safer machine',scenario:'An engineering team must make a machine perform reliably while respecting forces, energy, materials, and real design constraints.',roles:{physics:'Explain the governing physical mechanism.',engineering:'Turn that mechanism into a design choice under constraints.'}},
+ 'physics|trades_mechanical':{title:'Troubleshooting a real building system',scenario:'A building system is not performing as expected, so a technician must connect measured symptoms to the physics of energy, pressure, flow, or electricity.',roles:{physics:'Explain the underlying physical cause.',trades_mechanical:'Use measurements and system knowledge to diagnose and fix the problem.'}},
+ 'chemistry|energy':{title:'Making an industrial process more efficient',scenario:'A plant wants to reduce wasted energy while maintaining the temperatures and chemical conditions its process requires.',roles:{chemistry:'Explain reaction energy and material behavior.',energy:'Track where energy is supplied, transferred, and wasted.'}},
+ 'biology|medicine':{title:'From cell mechanism to a health decision',scenario:'A clinician needs to connect what is happening at the cell or system level to symptoms, tests, and a treatment decision.',roles:{biology:'Explain the underlying biological mechanism.',medicine:'Use that mechanism with evidence to reason about diagnosis or treatment.'}},
+ 'medicine|statistics':{title:'Interpreting a medical test',scenario:'A patient receives a test result, but the right interpretation depends on test accuracy, prevalence, and the biological question being asked.',roles:{medicine:'Define the clinical question and consequences.',statistics:'Translate sensitivity, specificity, uncertainty, and base rates into evidence.'}},
+ 'business|statistics':{title:'Deciding whether a change actually worked',scenario:'A company tests a new process and must decide whether better results are a real effect or ordinary variation.',roles:{business:'Define the decision and operational stakes.',statistics:'Separate signal from noise and quantify uncertainty.'}},
+ 'finance|mathematics':{title:'How money grows and obligations compound',scenario:'Someone is comparing a loan, an investment, or a long-term savings plan where small percentage changes accumulate over time.',roles:{mathematics:'Model the rate, growth, and compounding relationship.',finance:'Interpret the model as cash flows, costs, risk, and return.'}},
+ 'economics|geography':{title:'A supply chain under pressure',scenario:'A company depends on materials moving through ports, roads, and regions, and a disruption changes both availability and price.',roles:{geography:'Explain location, networks, distance, and physical constraints.',economics:'Explain how scarcity and incentives move prices and behavior.'}},
+ 'economics|geopolitics':{title:'Trade under geopolitical pressure',scenario:'A political conflict changes access to energy, shipping, technology, or markets, forcing governments and firms to adapt.',roles:{geopolitics:'Explain the strategic actors and constraints.',economics:'Trace effects through trade, prices, substitution, and incentives.'}},
+ 'leadership|psychology':{title:'Why a team behaves the way it does',scenario:'A leader changes goals, incentives, or feedback and needs to predict how real people—not idealized workers—will respond.',roles:{psychology:'Explain motivation, bias, attention, and social behavior.',leadership:'Turn those mechanisms into communication, incentives, and team design.'}}
+};
+const SUBJECT_ARCS={
+ chemistry:{title:'Energy and matter in a real process',scenario:'Follow one physical process from what particles and bonds are doing to what you can measure as temperature, phase, or energy change.'},
+ economics:{title:'A real economy making tradeoffs',scenario:'Follow one decision through incentives, prices, production, jobs, and the consequences that appear elsewhere in the economy.'},
+ accounting:{title:'Reading the story behind business numbers',scenario:'Follow a real business decision and see how resources, obligations, cash, and performance show up in the accounting.'},
+ biology:{title:'How living systems turn information into action',scenario:'Follow a biological system from structure or information to the process that changes what a cell or organism actually does.'},
+ ai:{title:'Building a model that works outside the demo',scenario:'Follow a prediction system from data and training through evaluation, failure modes, and real-world use.'},
+ computing:{title:'How a reliable digital system works',scenario:'Follow information through a digital system and see how representation, logic, software, and constraints shape the outcome.'},
+ physics:{title:'Predicting a real physical system',scenario:'Follow forces, motion, energy, or fields through a system you could actually measure or design.'},
+ statistics:{title:'Making a decision from noisy evidence',scenario:'Follow a real question from data collection through uncertainty to a decision that could be wrong.'},
+ medicine:{title:'Reasoning from mechanism to decision',scenario:'Follow a health question from underlying mechanism through evidence, uncertainty, and a practical decision.'},
+ history:{title:'Following causes through time',scenario:'Trace how institutions, technology, resources, and human decisions combine to produce a historical change.'},
+ engineering:{title:'Designing under real constraints',scenario:'Take a real system and connect the underlying science to choices about safety, performance, cost, and reliability.'},
+ trades_mechanical:{title:'Diagnosing a system that has to work',scenario:'Follow symptoms, measurements, and system behavior until the physical cause and practical fix line up.'}
+};
+function pairKey(a,b){return [a,b].sort().join('|')}
+function arcTemplateForSubjects(a,b){return a&&b&&a!==b?ARC_PAIRS[pairKey(a,b)]||null:null}
+function conceptPairConnected(a,b){if(!a||!b)return false;if(a.subject_key===b.subject_key)return true;return !!arcTemplateForSubjects(a.subject_key,b.subject_key)}
 function subjectTeachingCandidate(subjectKey,exclude=new Set(),anchorLevel=null){
- let rows=concepts.filter(c=>c.subject_key===subjectKey&&!exclude.has(c.key)).map(c=>{let mode=subjectEvidence(subjectKey).confidence<35?'gap':'frontier',x=routeScore(c,mode);if(x.diagnostic)x.score=-9999;if(x.score>-9000){x.score+=(CORE_LESSONS[c.key]?45:0)+goalBoost(c);if(anchorLevel!=null)x.score+=Math.max(0,24-8*Math.abs((+c.level||1)-anchorLevel))}return x}).filter(x=>x.score>-9000).sort((a,b)=>b.score-a.score);return rows[0]||null
+ let rows=concepts.filter(c=>c.subject_key===subjectKey&&!exclude.has(c.key)).map(c=>{let mode=subjectEvidence(subjectKey).confidence<35?'gap':'frontier',x=routeScore(c,mode);if(x.diagnostic)x.score=-9999;if(x.score>-9000){x.score+=(CORE_LESSONS[c.key]?45:0)+goalBoost(c)+teachingRampBonus(c);if(anchorLevel!=null)x.score+=Math.max(0,30-10*Math.abs((+c.level||1)-anchorLevel))}return x}).filter(x=>x.score>-9000).sort((a,b)=>b.score-a.score);return rows[0]||null
 }
 function primaryTeachingCandidate(exclude=new Set()){
- let goalMatches=concepts.map(c=>{let mode=subjectEvidence(c.subject_key).confidence<35?'gap':'frontier',x=routeScore(c,mode);if(x.diagnostic)x.score=-9999;x.score+=goalBoost(c)+(CORE_LESSONS[c.key]?35:0);return x}).filter(x=>!exclude.has(x.c.key)&&x.score>-9000).sort((a,b)=>b.score-a.score);
+ let goalMatches=concepts.map(c=>{let mode=subjectEvidence(c.subject_key).confidence<35?'gap':'frontier',x=routeScore(c,mode);if(x.diagnostic)x.score=-9999;x.score+=goalBoost(c)+(CORE_LESSONS[c.key]?35:0)+teachingRampBonus(c)+weeklyCoverageBoost(c);return x}).filter(x=>!exclude.has(x.c.key)&&x.score>-9000).sort((a,b)=>b.score-a.score);
  return goalMatches[0]||foundationTeachingCandidate(exclude)||pickCandidate('frontier',exclude)||pickCandidate('gap',exclude)
 }
-function chooseSessionPlan(){
- let used=new Set(),plan=[],types=sessionAllocation(),primary=primaryTeachingCandidate(used);
- if(!primary)return [];
- plan.push({type:'lesson',route:primary,session_role:'primary'});used.add(primary.c.key);
- for(let i=1;i<types.length;i++){
-   if(types[i]==='review'){
-     let review=concepts.map(c=>routeScore(c,'review')).filter(x=>x.m&&x.m.next_review_at&&new Date(x.m.next_review_at)<=new Date()&&atlasTaughtConcept(x.c.key)).sort((a,b)=>b.score-a.score)[0];
-     if(review){plan.push({type:'review',route:review,session_role:'retain'});continue}
-   }
-   // Prefer a nearby concept in the same subject so the session feels like a lesson arc, not channel surfing.
-   let same=subjectTeachingCandidate(primary.c.subject_key,used,+primary.c.level||1),next=same;
-   if(!next&&i===1){
-     // A second subject is allowed when it is a real bridge or much more aligned to the learner's stated goal.
-     let bridge=pickCandidate('bridge',used,new Set(),true),other=primaryTeachingCandidate(used);
-     next=(bridge&&bridge.score>(other?.score||-9999)-8)?bridge:other;
-   }
-   if(!next)next=primaryTeachingCandidate(used);
-   if(next){plan.push({type:'lesson',route:next,session_role:next.c.subject_key===primary.c.subject_key?'deepening':'secondary'});used.add(next.c.key)}
- }
- return plan.slice(0,types.length)
+function coherentSecondary(primary,exclude=new Set(),deep=false){
+ if(!primary)return null;let same=subjectTeachingCandidate(primary.c.subject_key,exclude,+primary.c.level||1);if(deep)return same;
+ let cross=concepts.filter(c=>c.subject_key!==primary.c.subject_key&&!exclude.has(c.key)&&arcTemplateForSubjects(primary.c.subject_key,c.subject_key)).map(c=>{let mode=subjectEvidence(c.subject_key).confidence<35?'gap':'frontier',x=routeScore(c,mode);if(x.diagnostic)x.score=-9999;if(x.score>-9000)x.score+=goalBoost(c)+(CORE_LESSONS[c.key]?30:0)+teachingRampBonus(c)+18;return x}).filter(x=>x.score>-9000).sort((a,b)=>b.score-a.score)[0];
+ if(cross&&cross.score>(same?.score||-9999)-5)return cross;return same||cross||null
+}
+function buildSessionArc(plan,mode='balanced'){
+ let lessons=plan.filter(p=>p.type==='lesson'),a=lessons[0]?.route.c,b=lessons.find(p=>p.route.c.subject_key!==a?.subject_key)?.route.c||lessons[1]?.route.c||null;if(!a)return null;
+ let sa=a.subject_key,sb=b?.subject_key||sa,pair=arcTemplateForSubjects(sa,sb),subject=getSubject(sa)?.name||sa;
+ if(pair){let roleA=pair.roles?.[sa]||'',roleB=pair.roles?.[sb]||'';return {mode,title:pair.title,scenario:pair.scenario,subjects:[sa,sb],connection:`${getSubject(sa)?.name}: ${roleA} ${getSubject(sb)?.name}: ${roleB}`,roles:pair.roles||{},concepts:lessons.map(x=>x.route.c.key)}}
+ let base=SUBJECT_ARCS[sa]||{title:`Use ${a.name}${b?` to understand ${b.name}`:''}`,scenario:`Stay inside ${subject} long enough to see how the ideas form a pattern instead of isolated facts.`};
+ return {mode,title:mode==='deep_dive'?`Deep dive · ${base.title}`:base.title,scenario:base.scenario,subjects:[sa],connection:b?`First build ${a.name}; then use it as scaffolding for ${b.name}.`:`Build one idea thoroughly, then apply it before leaving the subject.`,roles:{[sa]:`Use each concept to make the next one easier to understand.`},concepts:lessons.map(x=>x.route.c.key)}
+}
+function stageEstimate(type,index,total){let m=+profile.daily_minutes||30;if(type==='synthesis')return m<=20?5:m<=40?8:m<=60?10:12;if(type==='review')return Math.max(5,Math.round(m*.12));let lessonCount=Math.max(1,total-(sessionDesign().synthesis?1:0)-(sessionDesign().review?1:0));let reserved=(sessionDesign().synthesis?(m<=20?5:m<=40?8:m<=60?10:12):0)+(sessionDesign().review?Math.max(5,Math.round(m*.12)):0);return Math.max(5,Math.round((m-reserved)/lessonCount))}
+function reviewCandidateForArc(primary,exclude=new Set()){
+ let rows=concepts.map(c=>routeScore(c,'review')).filter(x=>x.m&&x.m.next_review_at&&new Date(x.m.next_review_at)<=new Date()&&atlasTaughtConcept(x.c.key)&&!exclude.has(x.c.key)&&(x.c.subject_key===primary.c.subject_key||arcTemplateForSubjects(primary.c.subject_key,x.c.subject_key))).sort((a,b)=>b.score-a.score);return rows[0]||null
+}
+function chooseSessionPlan(mode='balanced'){
+ let used=new Set(),plan=[],design=sessionDesign(),primary=primaryTeachingCandidate(used);if(!primary)return [];
+ plan.push({type:'lesson',route:primary,session_role:'anchor'});used.add(primary.c.key);
+ for(let i=1;i<design.lessons;i++){let next=coherentSecondary(primary,used,mode==='deep_dive');if(!next)next=subjectTeachingCandidate(primary.c.subject_key,used,+primary.c.level||1)||primaryTeachingCandidate(used);if(!next)break;plan.push({type:'lesson',route:next,session_role:next.c.subject_key===primary.c.subject_key?'deepening':'connected'});used.add(next.c.key)}
+ if(design.review){let review=reviewCandidateForArc(primary,used);if(review){plan.push({type:'review',route:review,session_role:'retain'});used.add(review.c.key)}}
+ if(design.synthesis){plan.push({type:'synthesis',route:{c:primary.c,score:0,reasons:['integrated application'],e:primary.e,m:primary.m,diagnostic:false},session_role:'synthesis'})}
+ plan.forEach((p,i)=>p.estimated_minutes=stageEstimate(p.type,i,plan.length));sessionArc=buildSessionArc(plan,mode);sessionMode=mode;return plan
 }
 function nextIncompletePlanIndex(){for(let i=0;i<todayPlan.length;i++){let p=todayPlan[i],key=`${p.type}_${p.route.c.key}`;if(!todayDone.has(key))return i}return -1}
 async function startOrContinueDailySession(){
  if(dailySessionComplete)return;
- guidedSessionActive=true;await saveDailyProgress(false);renderToday();let i=nextIncompletePlanIndex();if(i>=0)openTask(i)
+ if(!todayPlan.length)todayPlan=chooseSessionPlan(sessionMode||'balanced');guidedSessionActive=true;await saveDailyProgress(false);renderToday();let i=nextIncompletePlanIndex();if(i>=0)openTask(i)
 }
-function getFrontier(){let pick=pickCandidate('frontier')||pickCandidate('general')||{};frontierConcept=pick.c||concepts[0];let subject=getSubject(frontierConcept?.subject_key),state=states.find(x=>x.subject_key===subject?.key);currentRoute=pick;return {subject,state,concept:frontierConcept,reasons:pick.reasons||[],score:pick.score||0}}
-async function loadApp(){show('app');$('logout').classList.remove('hidden');$('dailyMinutes').textContent=profile.daily_minutes;try{await loadCore();await syncStreakFromSessions();await restoreDailyProgress()}catch(err){setSystemStatus(err?.message||'Atlas could not load your learning map.','error');return}setSystemStatus(coreLoadWarning,coreLoadWarning?'warn':'');renderAll();if(localStorage.getItem('atlas_show_snapshot')==='1'){localStorage.removeItem('atlas_show_snapshot');let ranked=subjects.map(s=>({s,e:subjectEvidence(s.key)})).filter(x=>x.e.known).sort((a,b)=>b.e.ability-a.e.ability),strong=ranked[0],weak=ranked.filter(x=>x.e.confidence>=35).sort((a,b)=>a.e.ability-b.e.ability)[0],uncertain=subjects.map(s=>({s,e:subjectEvidence(s.key)})).filter(x=>x.e.confidence<35).slice(0,5);$('modalBody').innerHTML=`<div class="eyebrow">YOUR FIRST KNOWLEDGE MAP</div><h2>Here’s what Atlas learned about you.</h2><p><strong>Strongest signal:</strong> ${strong?.s.name||'still forming'}.</p><p><strong>Largest measured gap:</strong> ${weak?.s.name||'not enough evidence yet'}.</p><p><strong>Still uncertain:</strong> ${uncertain.map(x=>x.s.name).join(', ')||'very little'}.</p><div class="notice">This is a starting model, not a permanent label. Every session can move it.</div><button id="snapshotContinue" class="primary">Start my first adaptive session</button>`;$('modal').classList.remove('hidden');$('snapshotContinue').onclick=()=>$('modal').classList.add('hidden')}}
+function bestDeepDiveConcept(subjectKey){
+ let rows=concepts.filter(c=>c.subject_key===subjectKey).map(c=>routeScore(c,'frontier')).filter(x=>x.score>-9000).sort((a,b)=>b.score-a.score);
+ return rows[0]||concepts.filter(c=>c.subject_key===subjectKey).map(c=>routeScore(c,'general')).sort((a,b)=>b.score-a.score)[0]||null
+}
+function openDeepDiveForSubject(subjectKey,conceptKey=null){
+ deepDiveSubjectKey=subjectKey||deepDiveSubjectKey||pickCandidate('frontier')?.c?.subject_key||subjects[0]?.key||null;
+ let picked=conceptKey?concepts.find(c=>c.key===conceptKey):bestDeepDiveConcept(deepDiveSubjectKey)?.c;
+ frontierConcept=picked||bestDeepDiveConcept(deepDiveSubjectKey)?.c||null;
+ currentRoute=frontierConcept?routeScore(frontierConcept,'frontier'):null;
+ document.querySelector('[data-page="frontier"]').click();
+ renderFrontier();
+ requestAnimationFrame(()=>$('frontierCard')?.scrollIntoView({behavior:'smooth',block:'center'}))
+}
+function getFrontier(){
+ let pick=null;
+ if(frontierConcept&&(!deepDiveSubjectKey||frontierConcept.subject_key===deepDiveSubjectKey))pick=routeScore(frontierConcept,'frontier');
+ if(!pick||pick.score<=-9000)pick=deepDiveSubjectKey?bestDeepDiveConcept(deepDiveSubjectKey):(pickCandidate('frontier')||pickCandidate('general'));
+ pick=pick||{};
+ frontierConcept=pick.c||frontierConcept||concepts[0];deepDiveSubjectKey=frontierConcept?.subject_key||deepDiveSubjectKey;
+ let subject=getSubject(frontierConcept?.subject_key),state=states.find(x=>x.subject_key===subject?.key);currentRoute=pick;
+ return {subject,state,concept:frontierConcept,reasons:pick.reasons||[],score:pick.score||0}
+}
+async function loadApp(){show('app');$('logout').classList.remove('hidden');$('dailyMinutes').textContent=profile.daily_minutes;try{await loadCore();let retried=await retryPendingSessionSummary();if(retried)await loadCore();await syncStreakFromSessions();await restoreDailyProgress()}catch(err){setSystemStatus(err?.message||'Atlas could not load your learning map.','error');return}setSystemStatus(coreLoadWarning,coreLoadWarning?'warn':'');renderAll();if(localStorage.getItem('atlas_show_snapshot')==='1'){localStorage.removeItem('atlas_show_snapshot');let ranked=subjects.map(s=>({s,e:subjectEvidence(s.key)})).filter(x=>x.e.known).sort((a,b)=>b.e.ability-a.e.ability),strong=ranked[0],weak=ranked.filter(x=>x.e.confidence>=35).sort((a,b)=>a.e.ability-b.e.ability)[0],uncertain=subjects.map(s=>({s,e:subjectEvidence(s.key)})).filter(x=>x.e.confidence<35).slice(0,5);$('modalBody').innerHTML=`<div class="eyebrow">YOUR FIRST KNOWLEDGE MAP</div><h2>Here’s what Atlas learned about you.</h2><p><strong>Strongest signal:</strong> ${strong?.s.name||'still forming'}.</p><p><strong>Largest measured gap:</strong> ${weak?.s.name||'not enough evidence yet'}.</p><p><strong>Still uncertain:</strong> ${uncertain.map(x=>x.s.name).join(', ')||'very little'}.</p><div class="notice">This is a starting model, not a permanent label. Every session can move it.</div><button id="snapshotContinue" class="primary">Start my first adaptive session</button>`;$('modal').classList.remove('hidden');$('snapshotContinue').onclick=()=>$('modal').classList.add('hidden')}}
 function renderAll(){if(!todayPlan.length&&!dailySessionComplete)todayPlan=chooseSessionPlan();renderLearnerSnapshot();renderMap();renderPortfolio();renderForecast();renderToday();renderFrontier();renderWeekly();renderDiscovery();renderExplore();renderInsights();renderBuild();checkMilestones()}
 
 function discoveryCandidates(){
@@ -449,14 +536,72 @@ function conceptStatus(c){
  let m=conceptMastery(c.key),e=subjectEvidence(c.subject_key),ret=predictedRetention(m),due=m?.next_review_at&&new Date(m.next_review_at)<=new Date();
  if(due)return ['due','Due for retrieval'];if(ret!==null&&ret<.55)return ['due',`Retention ${Math.round(ret*100)}% · fading`];if(verifiedConcept(m))return ['mastered','Verified'];if(m&&+m.evidence_count>0)return ['shaky',+m.mastery>=50?'Developing':'Needs repair'];if((+c.level)<=Math.floor(e.boundary||0))return ['frontier','Provisionally placed'];return ['unknown','Unknown']
 }
+function subjectMapInsight(subjectKey){
+ let s=getSubject(subjectKey),list=concepts.filter(c=>c.subject_key===subjectKey).sort((a,b)=>(+a.level)-(+b.level)),e=subjectEvidence(subjectKey);
+ let statuses=list.map(c=>({c,status:conceptStatus(c),m:conceptMastery(c.key),blocked:prereqs.filter(p=>p.concept_key===c.key&&!prereqSatisfied(p))}));
+ let verifiedRows=statuses.filter(x=>verifiedConcept(x.m)),due=statuses.filter(x=>x.status[0]==='due'),shaky=statuses.filter(x=>x.status[0]==='shaky'),unknown=statuses.filter(x=>x.status[0]==='unknown'),blocked=statuses.filter(x=>x.blocked.length);
+ let direct=statuses.filter(x=>x.m&&(+x.m.evidence_count||0)>0),highest=verifiedRows.slice().sort((a,b)=>(+b.c.level)-(+a.c.level))[0]?.c||null;
+ let recommendation=null,kind='learn',reason='';
+ if(e.confidence<35){
+   let level=diagnosticTarget(subjectKey),candidate=list.find(c=>+c.level===level)||list[0];recommendation=candidate;kind='calibrate';
+   reason=`Atlas has low-confidence evidence in ${s?.name||subjectKey}. The frontier estimate is provisional, so the next need is a small amount of better evidence before Atlas accelerates.`
+ }else if(due.length){
+   recommendation=due[0].c;kind='review';
+   reason=`${recommendation.name} was previously demonstrated, but its retention signal says it is due for retrieval. Strengthening it now is more valuable than simply moving forward.`
+ }else if(shaky.length){
+   recommendation=shaky.slice().sort((a,b)=>(+a.c.level)-(+b.c.level))[0].c;kind='repair';
+   reason=`You have direct evidence for ${recommendation.name}, but it is not verified yet. Atlas should repair this weak point before treating the subject as stronger than the evidence supports.`
+ }else{
+   let ready=list.filter(c=>!verifiedConcept(conceptMastery(c.key))&&prereqs.filter(p=>p.concept_key===c.key).every(prereqSatisfied))
+     .map(c=>({c,r:routeScore(c,'frontier')})).filter(x=>x.r.score>-9000).sort((a,b)=>b.r.score-a.r.score)[0];
+   recommendation=ready?.c||list.find(c=>!verifiedConcept(conceptMastery(c.key)))||list[list.length-1];kind='learn';
+   reason=recommendation?`Your prerequisites and current evidence make ${recommendation.name} the clearest next learning move in ${s?.name||subjectKey}.`:`Atlas has no obvious gap in this subject right now; transfer and delayed retrieval are the next useful tests.`
+ }
+ return {s,list,e,statuses,verifiedRows,due,shaky,unknown,blocked,direct,highest,recommendation,kind,reason}
+}
 function renderMap(){
- $('mapItems').innerHTML=subjects.filter(s=>s.key!=='hvac').map(s=>{let e=subjectEvidence(s.key),ms=masteries.filter(m=>m.subject_key===s.key),count=concepts.filter(c=>c.subject_key===s.key).length,verifiedN=ms.filter(verifiedConcept).length;return `<button class="track mapSubject" data-subject="${s.key}" style="width:100%;text-align:left;background:transparent;color:inherit;border:0;padding:0"><div class="track-head"><span><strong>${s.name}</strong></span><span>${verifiedN}/${count} verified</span></div><div class="barbg"><div class="bar" style="width:${Math.min(100,(e.boundary||0)*10)}%"></div></div><div class="track-sub"><span>Frontier L${(e.boundary||0).toFixed(1)}/10</span><span class="${e.confidence<35?'confidence-low':'confidence-good'}">Confidence ${e.confidence.toFixed(0)}%</span><span>Tap to explore →</span></div></button>`}).join('');
- document.querySelectorAll('.mapSubject').forEach(b=>b.onclick=()=>renderMapDetail(b.dataset.subject))
+ $('mapItems').innerHTML=subjects.filter(s=>s.key!=='hvac').map(s=>{
+   let e=subjectEvidence(s.key),ms=masteries.filter(m=>m.subject_key===s.key),count=concepts.filter(c=>c.subject_key===s.key).length,verifiedN=ms.filter(verifiedConcept).length,verifiedPct=count?Math.round(verifiedN/count*100):0;
+   return `<button class="track mapSubject" data-subject="${s.key}" aria-label="Explore ${s.name} knowledge insights" style="width:100%;text-align:left;background:transparent;color:inherit;border:0;padding:0"><div class="track-head"><span><strong>${s.name}</strong></span><span><strong>${verifiedN}/${count}</strong> verified · ${verifiedPct}%</span></div><div class="barbg" title="Verified knowledge progress"><div class="bar" style="width:${verifiedPct}%"></div></div><div class="track-sub"><span>Estimated frontier L${(e.boundary||0).toFixed(1)}/10</span><span class="${e.confidence<35?'confidence-low':'confidence-good'}">Estimate confidence ${e.confidence.toFixed(0)}%</span><span class="map-explore-link">Explore your insights →</span></div></button>`
+ }).join('');
+ document.querySelectorAll('.mapSubject').forEach(b=>b.addEventListener('click',()=>renderMapDetail(b.dataset.subject)))
+}
+async function openMapRecommendedLesson(concept){
+ if(!concept)return;
+ openDeepDiveForSubject(concept.subject_key,concept.key);
+ $('frontierCard').innerHTML=`<div class="eyebrow">FROM YOUR KNOWLEDGE MAP · ${getSubject(concept.subject_key)?.name||''}</div><strong>${concept.name}</strong><p>${concept.description||concept.learning_objective||''}</p><div class="notice">Atlas selected this Deep Dive from your current evidence, prerequisite state, confidence, and retention needs.</div>`;
+ $('aiOutput').classList.remove('hidden');$('aiOutput').innerHTML='<div class="skeleton big"></div><div class="skeleton"></div>';
+ let core=coreLessonFor(concept);if(core){renderAI(core);return}
+ let difficulty=conceptDifficulty(concept),cached=learningObjects.find(x=>x.concept_key===concept.key&&x.route_type==='lesson'&&+x.difficulty===difficulty&&Date.now()-new Date(x.created_at).getTime()<3*864e5);
+ if(cached?.payload&&Object.keys(cached.payload).length){activeLearningObject=cached;renderAI(cached.payload);return}
+ let ctx=learnerContextFor(concept,'frontier');ctx.mode='lesson';let {data,error}=await db.functions.invoke('atlas-ai-content',{body:ctx});
+ if(error||!data){$('aiOutput').innerHTML='<div class="notice">Atlas could not build this Deep Dive right now. Your map has not been changed.</div>';return}
+ await saveLearningObject(concept,'lesson',data,difficulty);renderAI(data)
 }
 function renderMapDetail(subjectKey){
- let s=getSubject(subjectKey),list=concepts.filter(c=>c.subject_key===subjectKey).sort((a,b)=>(+a.level)-(+b.level)),e=subjectEvidence(subjectKey),el=$('mapDetail');el.classList.remove('hidden');
- el.innerHTML=`<div class="section-title"><div><div class="eyebrow">${s?.name||subjectKey}</div><h3>Concept map · frontier L${(e.boundary||0).toFixed(1)}</h3></div><button id="closeMapDetail" class="ghost">Close</button></div><div class="concept-grid">${list.map(c=>{let [cls,label]=conceptStatus(c),m=conceptMastery(c.key),req=prereqs.filter(p=>p.concept_key===c.key),blocked=req.filter(p=>!prereqSatisfied(p));return `<div class="concept-node ${cls}"><small>Level ${c.level} · ${label}${blocked.length?' · prerequisite blocked':''}</small><strong>${c.name}</strong><small>${c.learning_objective||c.description||''}</small><div class="track-sub"><span>${m?`Mastery ${(+m.mastery).toFixed(0)} · confidence ${(+m.confidence).toFixed(0)}%`:'No direct evidence yet'}</span>${req.length?`<span>${req.length} prerequisite${req.length===1?'':'s'}</span>`:''}</div></div>`}).join('')}</div>`;
- $('closeMapDetail').onclick=()=>el.classList.add('hidden')
+ let x=subjectMapInsight(subjectKey),{s,list,e,verifiedRows,due,shaky,unknown,blocked,direct,highest,recommendation,kind,reason}=x,el=$('mapDetail'),count=list.length,verifiedN=verifiedRows.length,verifiedPct=count?Math.round(verifiedN/count*100):0;
+ let needs=[];
+ if(due.length)needs.push(`${due.length} due for retrieval`);
+ if(shaky.length)needs.push(`${shaky.length} developing / needs repair`);
+ if(blocked.length)needs.push(`${blocked.length} prerequisite-blocked`);
+ if(unknown.length)needs.push(`${unknown.length} still unknown`);
+ if(!needs.length)needs.push('No immediate weak point detected');
+ let evidenceText=e.confidence<35?`Atlas is uncertain here. The L${(e.boundary||0).toFixed(1)} frontier is an estimate, not demonstrated mastery.`:direct.length?`Atlas has direct learning evidence on ${direct.length} of ${count} concepts. ${highest?`Your highest verified concept is ${highest.name} (Level ${highest.level}).`:''}`:`The current frontier comes mostly from placement evidence. Atlas still needs learning evidence before calling concepts verified.`;
+ let actionLabel=kind==='review'?`Review ${recommendation?.name||'this subject'}`:kind==='repair'?`Strengthen ${recommendation?.name||'this subject'}`:kind==='calibrate'?`Build evidence in ${s?.name||'this subject'}`:`Learn ${recommendation?.name||'next concept'}`;
+ el.classList.remove('hidden');
+ el.innerHTML=`<div class="section-title"><div><div class="eyebrow">${s?.name||subjectKey} · PERSONAL INSIGHTS</div><h3>${verifiedN}/${count} concepts verified · ${verifiedPct}%</h3></div><button id="closeMapDetail" class="ghost">Close</button></div>
+ <div class="map-insight-grid">
+   <div class="metric-card"><span>Verified knowledge</span><strong>${verifiedN}/${count}</strong><small>The bar above reflects this exact number.</small></div>
+   <div class="metric-card"><span>Estimated frontier</span><strong>L${(e.boundary||0).toFixed(1)}</strong><small>${e.confidence.toFixed(0)}% confidence · not the same as verified progress.</small></div>
+   <div class="metric-card"><span>Direct evidence</span><strong>${direct.length}</strong><small>Concepts with actual learning evidence.</small></div>
+   <div class="metric-card"><span>Needs attention</span><strong>${due.length+shaky.length}</strong><small>${needs.join(' · ')}</small></div>
+ </div>
+ <div class="notice map-next-move"><div class="eyebrow">NEXT BEST MOVE</div><h3>${recommendation?.name||'Keep building transfer'}</h3><p>${reason}</p>${recommendation?`<button id="mapLearnNext" class="primary">${actionLabel}</button>`:''}</div>
+ <div class="ai-section"><strong>What this means for you</strong><p>${evidenceText}</p></div>
+ <div class="ai-section"><strong>Concept-level map</strong><div class="concept-grid">${list.map(c=>{let [cls,label]=conceptStatus(c),m=conceptMastery(c.key),req=prereqs.filter(p=>p.concept_key===c.key),blockedReq=req.filter(p=>!prereqSatisfied(p));return `<div class="concept-node ${cls}"><small>Level ${c.level} · ${label}${blockedReq.length?' · prerequisite blocked':''}</small><strong>${c.name}</strong><small>${c.learning_objective||c.description||''}</small><div class="track-sub"><span>${m?`Mastery ${(+m.mastery).toFixed(0)} · confidence ${(+m.confidence).toFixed(0)}% · ${+m.evidence_count||0} evidence`:'No direct learning evidence yet'}</span>${blockedReq.length?`<span>Blocked by: ${blockedReq.map(p=>conceptByKey(p.prerequisite_key)?.name||p.prerequisite_key).join(', ')}</span>`:req.length?`<span>Prerequisites ready</span>`:''}</div></div>`}).join('')}</div></div>`;
+ $('closeMapDetail').onclick=()=>el.classList.add('hidden');
+ if($('mapLearnNext'))$('mapLearnNext').onclick=()=>openMapRecommendedLesson(recommendation);
+ requestAnimationFrame(()=>el.scrollIntoView({behavior:'smooth',block:'start'}))
 }
 function portfolioMetrics(){
  let es=subjects.map(s=>subjectEvidence(s.key)).filter(e=>e.known),v=es.length?es.reduce((a,e)=>a+(e.verified||0),0)/es.length:0,c=es.length?es.reduce((a,e)=>a+e.confidence,0)/es.length:0;
@@ -486,21 +631,30 @@ function taskLabel(p){if(p.type==='lesson')return ['Micro-lesson',`${getSubject(
 }
 function renderToday(){
  let now=new Date(),m=sessions.filter(s=>s.completed&&new Date(s.completed_at||s.created_at).getMonth()===now.getMonth()&&new Date(s.completed_at||s.created_at).getFullYear()===now.getFullYear()).reduce((a,s)=>a+(s.actual_minutes||0),0);$('monthMinutes').textContent=m;
- if(!todayPlan.length&&!dailySessionComplete)todayPlan=chooseSessionPlan();
+ if(!todayPlan.length&&!dailySessionComplete)todayPlan=chooseSessionPlan(sessionMode||'balanced');if(!sessionArc&&todayPlan.length)sessionArc=buildSessionArc(todayPlan,sessionMode||'balanced');
  let streak=+profile.current_streak||0,last=profile.last_active_on?String(profile.last_active_on).slice(0,10):null,today=localDayKey(),streakDone=last===today;
  $('todayStreak').innerHTML=`<div><span class="streak-flame">🔥</span><strong>${streak} day${streak===1?'':'s'}</strong><span> current streak</span></div><small>${streakDone?'Today is already protected.':streak?`Complete today’s guided session to extend it to ${streak+1}.`:'Complete today’s guided session to start your streak.'} Longest: ${+profile.longest_streak||0}.</small>`;
- let goal=String(profile.learning_goal||'').trim();$('sessionGoalLine').textContent=goal?`Today is biased toward your goal: “${goal}”`:'Atlas is balancing your measured gaps, frontier, interests, and long-term breadth. You can add a specific learning goal in Account.';
- if(dailySessionComplete){$('todaySummary').textContent='Today’s guided learning session is complete. Atlas will not start another daily plan until the next study day.';$('startDailySession').textContent='Session complete';$('startDailySession').disabled=true;$('todayItems').innerHTML=todayPlan.map((p,i)=>{let c=p.route.c;return `<div class="task done"><div><strong>${i+1}. ${getSubject(c.subject_key)?.name} · ${c.name}</strong><small>${p.type==='review'?'Short retrieval':'Micro-lesson'} completed</small></div><span>✓</span></div>`}).join('')+`<div class="notice"><strong>Done for today.</strong> Optional Frontier, Discovery, and Explore do not restart the daily session.</div>`;$('allocationSummary').innerHTML='<span class="allocation-chip">Guided session complete</span>';$('sessionDone').textContent=`${todayPlan.length} / ${todayPlan.length} complete`;return}
- let subjectsInPlan=[...new Set(todayPlan.filter(p=>p.type!=='review').map(p=>getSubject(p.route.c.subject_key)?.name).filter(Boolean))];
- $('todaySummary').textContent=`This is one guided learning session, not a list of assessments. Atlas will lead you through ${todayPlan.length} focused ${todayPlan.length===1?'micro-lesson':'steps'}${subjectsInPlan.length?` centered on ${subjectsInPlan.join(subjectsInPlan.length>1?' and ':'')}`:''}. Each lesson teaches first, then checks understanding.`;
- let next=nextIncompletePlanIndex();$('startDailySession').disabled=false;$('startDailySession').textContent=todayDone.size?`Continue session · step ${next+1} of ${todayPlan.length}`:`Start ${profile.daily_minutes}-minute guided session`;
- $('todayItems').innerHTML=todayPlan.map((p,i)=>{let c=p.route.c,key=`${p.type}_${c.key}`,done=todayDone.has(key),current=i===next;return `<div class="task session-preview ${done?'done':''} ${current?'current':''}"><div><strong>${i+1}. ${p.type==='review'?'Short retrieval':'Micro-lesson'} · ${c.name}</strong><small>${getSubject(c.subject_key)?.name}${p.session_role==='deepening'?' · deepens the same subject':p.session_role==='secondary'?' · second focus':''}${p.route.reasons?.length?' · '+p.route.reasons.slice(0,2).join(', '):''}</small></div><span>${done?'✓':current?'Next':'Later'}</span></div>`}).join('');
- $('allocationSummary').innerHTML=`<span class="allocation-chip">${profile.daily_minutes} minutes</span><span class="allocation-chip">${todayPlan.filter(p=>p.type!=='review').length} teaching block${todayPlan.filter(p=>p.type!=='review').length===1?'':'s'}</span>${todayPlan.some(p=>p.type==='review')?'<span class="allocation-chip">1 short retrieval</span>':''}`;$('sessionDone').textContent=`${todayDone.size} / ${todayPlan.length} complete`;setTimeout(prefetchLearningObject,250)
+ let goal=String(profile.learning_goal||'').trim();$('sessionGoalLine').textContent=goal?`Your goal influences today’s route: “${goal}”`:'Atlas balances your goals, gaps, frontier, interests, retention, and long-term breadth across the week.';
+ if(sessionArc){$('sessionArcTitle').textContent=sessionArc.title;$('sessionArcScenario').textContent=sessionArc.scenario;$('sessionArcConnection').textContent=sessionArc.connection||'Today’s concepts were selected because one should make the next easier to understand.'}
+ if(dailySessionComplete){$('todaySummary').textContent='Today’s guided learning session is complete. Atlas will not start another daily plan until the next study day.';$('startDailySession').textContent='Session complete';$('startDailySession').disabled=true;$('deepDiveDaily').classList.add('hidden');$('todayItems').innerHTML=todayPlan.map((p,i)=>{let c=p.route.c;return `<div class="task done"><div><strong>${i+1}. ${p.type==='synthesis'?'Connect & apply':p.type==='review'?'Short retrieval':getSubject(c.subject_key)?.name+' · '+c.name}</strong><small>${p.type==='synthesis'?'Integrated real-world application':p.type==='review'?'Retrieval from prior teaching':'Lesson completed'}</small></div><span>✓</span></div>`}).join('')+`<div class="notice"><strong>Done for today.</strong> Optional Deep Dive, Discovery, or Explore do not restart the daily session.</div>`;$('allocationSummary').innerHTML='<span class="allocation-chip">Guided session complete</span>';$('sessionDone').textContent=`${todayPlan.length} / ${todayPlan.length} complete`;return}
+ let lessonSubjects=[...new Set(todayPlan.filter(p=>p.type==='lesson').map(p=>getSubject(p.route.c.subject_key)?.name).filter(Boolean))],target=+profile.daily_minutes||30;
+ $('todaySummary').textContent=`One connected learning arc built for about ${target} minutes of active study. ${lessonSubjects.length>1?`Atlas uses ${lessonSubjects.join(' + ')} only because today’s real-world situation gives them a meaningful connection.`:`Today stays focused in ${lessonSubjects[0]||'one area'} long enough for the ideas to form a pattern.`}`;
+ let next=nextIncompletePlanIndex();$('startDailySession').disabled=false;$('startDailySession').textContent=todayDone.size?`Continue session · step ${next+1} of ${todayPlan.length}`:`Start ${target}-minute guided session`;
+ $('deepDiveDaily').classList.toggle('hidden',todayDone.size>0||guidedSessionActive);let primary=todayPlan.find(p=>p.type==='lesson')?.route.c;$('deepDiveDaily').textContent=primary?`Deep Dive in ${getSubject(primary.subject_key)?.name||'this subject'}`:'Open Deep Dive';$('deepDiveDaily').onclick=()=>openDeepDiveForSubject(primary?.subject_key||null,primary?.key||null);
+ $('todayItems').innerHTML=todayPlan.map((p,i)=>{let c=p.route.c,key=`${p.type}_${c.key}`,done=todayDone.has(key),current=i===next,label=p.type==='synthesis'?'Connect & apply':p.type==='review'?'Short retrieval':p.session_role==='connected'?'Connected micro-lesson':'Micro-lesson',sub=p.type==='synthesis'?(sessionArc?.title||'Apply the session as one pattern'):p.type==='review'?`${getSubject(c.subject_key)?.name} · ${c.name}`:`${getSubject(c.subject_key)?.name} · ${c.name}`;return `<div class="task session-preview ${done?'done':''} ${current?'current':''}"><div><strong>${i+1}. ${label} · ~${p.estimated_minutes||stageEstimate(p.type,i,todayPlan.length)} min</strong><small>${sub}</small></div><span>${done?'✓':current?'Next':'Later'}</span></div>`}).join('');
+ $('allocationSummary').innerHTML=`<span class="allocation-chip">Target: ${target} min</span><span class="allocation-chip">${todayPlan.filter(p=>p.type==='lesson').length} lesson${todayPlan.filter(p=>p.type==='lesson').length===1?'':'s'}</span>${todayPlan.some(p=>p.type==='synthesis')?'<span class="allocation-chip">1 integrated application</span>':''}${todayPlan.some(p=>p.type==='review')?'<span class="allocation-chip">1 related review</span>':''}<span class="allocation-chip">Balanced daily arc</span>`;$('sessionDone').textContent=`${todayDone.size} / ${todayPlan.length} complete`;setTimeout(prefetchLearningObject,250)
 }
 $('startDailySession').onclick=startOrContinueDailySession;
+
 function renderFrontier(){
- let top=pickCandidate('frontier')||pickCandidate('general'),f=top?{concept:top.c,subject:getSubject(top.c.subject_key),reasons:top.reasons}:getFrontier(),e=subjectEvidence(f.subject?.key);
- $('frontierCard').innerHTML=`<div class="eyebrow">${f.subject?.name||'Frontier'}</div><strong>${f.concept?.name||'Next concept'}</strong><p>${f.concept?.description||''}</p><div class="track-sub"><span>Demonstrated frontier: L${(e.boundary||0).toFixed(1)}/10</span><span>Confidence: ${e.known?e.confidence.toFixed(0)+'%':'low'}</span><span>Target difficulty: ${conceptDifficulty(f.concept)}/10</span><span>Why now: ${(f.reasons||[]).join(' · ')}</span></div>`
+ if(!$('deepDiveSubject'))return;
+ if(!deepDiveSubjectKey)deepDiveSubjectKey=frontierConcept?.subject_key||pickCandidate('frontier')?.c?.subject_key||subjects[0]?.key||null;
+ $('deepDiveSubject').innerHTML=subjects.filter(s=>s.key!=='hvac').map(s=>`<option value="${s.key}" ${s.key===deepDiveSubjectKey?'selected':''}>${s.name}</option>`).join('');
+ let pick=bestDeepDiveConcept(deepDiveSubjectKey)||pickCandidate('frontier')||pickCandidate('general'),f=pick?{concept:pick.c,subject:getSubject(pick.c.subject_key),reasons:pick.reasons}:getFrontier();
+ if(frontierConcept&&frontierConcept.subject_key===deepDiveSubjectKey)f={concept:frontierConcept,subject:getSubject(frontierConcept.subject_key),reasons:currentRoute?.reasons||pick?.reasons||[]};
+ frontierConcept=f.concept;currentRoute=routeScore(frontierConcept,'frontier');let e=subjectEvidence(f.subject?.key);
+ $('frontierCard').innerHTML=`<div class="eyebrow">${f.subject?.name||'Deep Dive'} · YOUR CURRENT EDGE</div><strong>${f.concept?.name||'Next concept'}</strong><p>${f.concept?.description||f.concept?.learning_objective||''}</p><div class="track-sub"><span>Estimated frontier: L${(e.boundary||0).toFixed(1)}/10</span><span>Confidence: ${e.known?e.confidence.toFixed(0)+'%':'low'}</span><span>Target difficulty: ${conceptDifficulty(f.concept)}/10</span><span>Why this concept: ${(f.reasons||[]).join(' · ')||'best next concept in this subject'}</span></div>`;
+ $('deepDiveSubject').onchange=()=>{deepDiveSubjectKey=$('deepDiveSubject').value;frontierConcept=null;currentRoute=null;$('aiOutput').classList.add('hidden');renderFrontier()}
 }
 function conceptDifficulty(c){if(!c)return 3;let lo=+c.difficulty_min||+c.level||3,hi=+c.difficulty_max||lo;return Math.max(1,Math.min(10,Math.round((lo+hi)/2)))}
 function targetDifficulty(st){if(!st)return 3;return Math.max(2,Math.min(9,Math.round((+st.estimated_level)/12)))}
@@ -513,7 +667,7 @@ function recentAIContext(limit=8){
 }
 function learnerContextFor(concept,routeType){
  let e=subjectEvidence(concept.subject_key),m=conceptMastery(concept.key),strong=strongestKnownSubject(),bridgeFrom=bridgeSource(concept);if(bridgeFrom===concept.subject_key)bridgeFrom=null;let mods=modalityPerf.slice().sort((a,b)=>(+b.avg_score+ +b.transfer_score+ +b.delayed_retention)-(+a.avg_score+ +a.transfer_score+ +a.delayed_retention)),activeMis=misconceptions.filter(x=>x.concept_key===concept.key&&!x.resolved_at).slice(0,4);
- return {route_type:routeType,subject:getSubject(concept.subject_key)?.name||concept.subject_key,concept:concept.name,concept_key:concept.key,difficulty:conceptDifficulty(concept),estimated_level:e.ability,estimate_confidence:e.confidence,concept_mastery:m?+m.mastery:null,retention_probability:m?+m.retention_probability:null,forgetting_rate:m?+m.forgetting_rate:null,transfer_score:m?+m.transfer_score:null,interests:[...interestKeys()],strong_subject:strong?.key!==concept.subject_key?(strong?.name||null):null,bridge_from:bridgeFrom?getSubject(bridgeFrom)?.name||bridgeFrom:null,prerequisite_path:prereqs.filter(p=>p.concept_key===concept.key).map(p=>conceptByKey(p.prerequisite_key)?.name).filter(Boolean),recent_results:recentAIContext(),preferred_modalities:mods.slice(0,3).map(x=>({modality:x.modality,score:+x.avg_score,retention:+x.delayed_retention,transfer:+x.transfer_score})),misconceptions:activeMis.map(x=>({code:x.code,description:x.description,severity:+x.severity})),minutes:Math.max(4,Math.round(profile.daily_minutes/Math.max(1,sessionBlockCount())))}
+ return {route_type:routeType,subject:getSubject(concept.subject_key)?.name||concept.subject_key,concept:concept.name,concept_key:concept.key,difficulty:conceptDifficulty(concept),estimated_level:e.ability,estimate_confidence:e.confidence,concept_mastery:m?+m.mastery:null,retention_probability:m?+m.retention_probability:null,forgetting_rate:m?+m.forgetting_rate:null,transfer_score:m?+m.transfer_score:null,interests:[...interestKeys()],strong_subject:strong?.key!==concept.subject_key?(strong?.name||null):null,bridge_from:bridgeFrom?getSubject(bridgeFrom)?.name||bridgeFrom:null,prerequisite_path:prereqs.filter(p=>p.concept_key===concept.key).map(p=>conceptByKey(p.prerequisite_key)?.name).filter(Boolean),recent_results:recentAIContext(),preferred_modalities:mods.slice(0,3).map(x=>({modality:x.modality,score:+x.avg_score,retention:+x.delayed_retention,transfer:+x.transfer_score})),misconceptions:activeMis.map(x=>({code:x.code,description:x.description,severity:+x.severity})),minutes:Math.max(5,Math.round(profile.daily_minutes/Math.max(1,sessionDesign().lessons)))}
 }
 
 
@@ -640,10 +794,21 @@ function renderAI(d){
  $('aiOutput').innerHTML=`<div class="eyebrow">${teachingProviderLabel(d)}${d.modality?' · '+String(d.modality).toUpperCase():''}</div><h3>${d.title||'Lesson'}</h3>${renderTeachingBody(d)}${d.challenge?`<div class="ai-section"><strong>Try it yourself</strong>${renderTextBlock(d.challenge)}</div>`:''}${q?`<button id="revealFrontierCheck" class="primary">Check my understanding</button><div id="frontierCheck" class="ai-section hidden"><strong>Quick check</strong><p>${q.prompt||''}</p>${opts}<button class="answer aiQuiz idk-answer" data-i="-1" data-correct="${q.correct_index}">I don’t know yet</button><p id="aiQuizMsg"></p></div>`:''}${d.note?`<p class="fineprint">${d.note}</p>`:''}`;
  if(q){$('revealFrontierCheck').onclick=()=>{$('frontierCheck').classList.remove('hidden');$('revealFrontierCheck').classList.add('hidden')};document.querySelectorAll('.aiQuiz').forEach(b=>b.onclick=()=>{let i=+b.dataset.i,msg=i<0?'Good choice. Review the lesson instead of guessing.':i===+b.dataset.correct?`Correct. ${q.rationale||''}`:`Not yet. ${Array.isArray(q.feedback)?(q.feedback[i]||q.rationale||'Re-read the mechanism above.'):(q.rationale||'Re-read the mechanism above.')}`;$('aiQuizMsg').textContent=msg})}
 }
+function arcRoleForConcept(c){if(!sessionArc||!c)return '';return sessionArc.roles?.[c.subject_key]||sessionArc.connection||''}
+function makeItStickPrompt(c){
+ let role=arcRoleForConcept(c),m=+profile.daily_minutes||30;
+ if(m>=60)return `Teach the idea back in your own words, then explain how it changes the decision in today’s situation. ${role}`;
+ return `In one or two sentences, explain how ${c.name} helps you make sense of today’s situation. ${role}`
+}
+
 async function openTask(planIndex){
  let p=todayPlan[planIndex];if(!p||dailySessionComplete)return;activeLearningObject=null;let type=p.type,f={concept:p.route.c,subject:getSubject(p.route.c.subject_key)};
  taskOpenedAt=Date.now();saveDailyProgress(false);
- if(type==='review'){
+ if(type==='synthesis'){
+   let lessons=todayPlan.filter(x=>x.type==='lesson'),names=lessons.map(x=>`${getSubject(x.route.c.subject_key)?.name}: ${x.route.c.name}`),cross=new Set(lessons.map(x=>x.route.c.subject_key)).size>1;
+   $('modalBody').innerHTML=`<div class="eyebrow">CONNECT & APPLY · ${sessionArc?.title||'TODAY’S ARC'}</div><h2>Use the ideas together</h2><div class="notice"><strong>Situation:</strong> ${sessionArc?.scenario||'Use today’s concepts in one real situation.'}</div><div class="ai-section"><strong>What you just learned</strong><p>${names.join(' · ')}</p></div><div class="ai-section"><strong>Walk the situation through</strong><ol><li>What is the first mechanism or fact from today that matters?</li><li>${cross?'What does the second field add that the first one cannot explain by itself?':'How does the second concept change or deepen the first?'}</li><li>What decision, prediction, or conclusion would you make because of those ideas?</li></ol></div><textarea id="synthesisText" placeholder="A few sentences is enough. Focus on the causal chain, not perfect wording."></textarea><button id="taskDone" class="primary">Complete today’s application</button>`;
+   $('taskDone').dataset.provider='atlas_session';$('taskDone').dataset.modality='integrated_application';$('taskDone').onclick=()=>completeTask(planIndex)
+ }else if(type==='review'){
    if(!atlasTaughtConcept(f.concept.key))return setSystemStatus('Atlas will only use retrieval for concepts it has actually taught you. This block has been replaced on your next plan.','warn');
    let origin=learningObjects.filter(x=>x.concept_key===f.concept.key&&x.completed_at&&!['review','probe'].includes(x.route_type)&&x.provider!=='atlas_fallback').sort((a,b)=>new Date(b.completed_at)-new Date(a.completed_at))[0];
    $('modalBody').innerHTML=`<div class="eyebrow">SHORT REVIEW · ${f.subject?.name||''}</div><h2>${f.concept?.name}</h2><div class="notice">This review comes after a prior Atlas lesson. It is not new teaching.</div>${origin?.payload?.takeaway?`<p class="fineprint">Do not open the old lesson yet. First recall the key idea from memory.</p>`:''}<textarea id="retrieveText" placeholder="What do you remember about the mechanism? Give one concrete example if you can."></textarea><label class="fineprint">How complete did your recall feel?</label><select id="recallQuality"><option value="uncertain">Uncertain — major gaps</option><option value="partial">Partial — main idea, missing detail</option><option value="clear">Clear — mechanism and detail</option></select><button id="taskDone" class="primary">Evaluate retrieval</button>`;
@@ -658,8 +823,8 @@ async function openTask(planIndex){
      $('modalBody').innerHTML=`<div class="eyebrow">LESSON NOT AVAILABLE</div><h2>${f.concept?.name}</h2><div class="notice">Atlas could not load real instructional content for this concept. It will not replace teaching with a generic quiz.</div><p>${data?.note||'Try another lesson while the content provider is restored.'}</p><button id="taskCancelUnavailable" class="primary">Return to Today</button>`;$('taskCancelUnavailable').onclick=()=>$('modal').classList.add('hidden');$('modal').classList.remove('hidden');return
    }
    let q=data.quiz||null,hasCheck=!!(q&&Number.isInteger(q.correct_index)&&Array.isArray(q.options)&&q.options.length>=2),opts=hasCheck?q.options.map((x,i)=>`<button class="answer taskQuiz" type="button" data-i="${i}">${x}</button>`).join('')+`<button class="answer taskQuiz idk-answer" type="button" data-i="-1">I don’t know yet</button>`:'',media=curatedMediaFor(f.concept.key);
-   $('modalBody').innerHTML=isProbe?`<div class="eyebrow">QUICK CALIBRATION · ${f.subject?.name||''}</div><h2>${f.concept?.name}</h2><div class="notice">This is the one exception: a short map calibration, not a lesson. Atlas keeps these separate from teaching.</div><div class="ai-section"><strong>Diagnostic check</strong><p>${q?.prompt||'Choose the best answer.'}</p>${opts}</div><button id="taskDone" class="primary" disabled>Record calibration</button>`:`<div class="eyebrow">${teachingProviderLabel(data)} · ${f.subject?.name||''}</div><h2>${data.title||f.concept?.name}</h2>${renderTeachingBody(data)}${data.challenge?`<div class="ai-section"><strong>Guided practice</strong>${renderTextBlock(data.challenge)}${data.hint?`<p class="fineprint"><strong>Hint:</strong> ${data.hint}</p>`:''}</div>`:''}${media.length?`<div class="ai-section"><strong>Curated media</strong>${media.map(m=>`<p><a href="${m.url}" target="_blank" rel="noopener">${m.title} · ${m.provider}</a></p>`).join('')}</div>`:''}${type==='bridge'&&data.connection?'<textarea id="applyText" placeholder="In your own words, explain the shared mechanism and where the connection breaks…"></textarea>':''}${hasCheck?`<button id="revealTaskCheck" class="primary">I learned this — check my understanding</button><div id="taskCheck" class="ai-section hidden"><strong>Quick check</strong><p>${q.prompt}</p>${opts}<p id="taskQuizMsg" class="fineprint">Use “I don’t know yet” instead of guessing.</p></div><button id="taskDone" class="primary hidden" disabled>Finish lesson</button>`:`<div class="notice">This source provides real teaching material but no validated quiz. Atlas will record this as exposure only, not verified mastery.</div><button id="taskDone" class="primary">Finish lesson</button>`}`;
-   if($('revealTaskCheck'))$('revealTaskCheck').onclick=()=>{$('taskCheck').classList.remove('hidden');$('revealTaskCheck').classList.add('hidden');$('taskDone').classList.remove('hidden')};
+   $('modalBody').innerHTML=isProbe?`<div class="eyebrow">QUICK CALIBRATION · ${f.subject?.name||''}</div><h2>${f.concept?.name}</h2><div class="notice">This is the one exception: a short map calibration, not a lesson. Atlas keeps these separate from teaching.</div><div class="ai-section"><strong>Diagnostic check</strong><p>${q?.prompt||'Choose the best answer.'}</p>${opts}</div><button id="taskDone" class="primary" disabled>Record calibration</button>`:`<div class="eyebrow">${teachingProviderLabel(data)} · ${f.subject?.name||''}</div><h2>${data.title||f.concept?.name}</h2>${sessionArc?`<div class="notice session-context"><strong>Today’s situation:</strong> ${sessionArc.scenario}<br><span>${arcRoleForConcept(f.concept)}</span></div>`:''}${renderTeachingBody(data)}${data.challenge?`<div class="ai-section"><strong>Guided practice</strong>${renderTextBlock(data.challenge)}${data.hint?`<p class="fineprint"><strong>Hint:</strong> ${data.hint}</p>`:''}</div>`:''}${(+profile.daily_minutes||30)>=30?`<div class="ai-section"><strong>Make it stick</strong><p>${makeItStickPrompt(f.concept)}</p><textarea id="lessonReflection" placeholder="One or two sentences in your own words…"></textarea></div>`:''}${media.length?`<div class="ai-section"><strong>Curated media</strong>${media.map(m=>`<p><a href="${m.url}" target="_blank" rel="noopener">${m.title} · ${m.provider}</a></p>`).join('')}</div>`:''}${type==='bridge'&&data.connection?'<textarea id="applyText" placeholder="In your own words, explain the shared mechanism and where the connection breaks…"></textarea>':''}${hasCheck?`<button id="revealTaskCheck" class="primary">I learned this — check my understanding</button><div id="taskCheck" class="ai-section hidden"><strong>Quick check</strong><p>${q.prompt}</p>${opts}<p id="taskQuizMsg" class="fineprint">Use “I don’t know yet” instead of guessing.</p></div><button id="taskDone" class="primary hidden" disabled>Finish lesson</button>`:`<div class="notice">This source provides real teaching material but no validated quiz. Atlas will record this as exposure only, not verified mastery.</div><button id="taskDone" class="primary">Finish lesson</button>`}`;
+   if($('revealTaskCheck'))$('revealTaskCheck').onclick=()=>{let reflection=($('lessonReflection')?.value||'').trim();if((+profile.daily_minutes||30)>=30&&reflection.length<25)return alert('Take a moment to connect the lesson to today’s situation first — one or two sentences is enough.');$('taskCheck').classList.remove('hidden');$('revealTaskCheck').classList.add('hidden');$('taskDone').classList.remove('hidden')};
    $('taskDone').dataset.provider=data.provider||'unknown';$('taskDone').dataset.modality=data.modality||type;$('taskDone').dataset.objectId=activeLearningObject?.id||'';$('taskDone').dataset.noCheck=hasCheck?'0':'1';$('taskDone').dataset.bridgeHasConnection=data.connection?'1':'0';
    document.querySelectorAll('.taskQuiz').forEach(b=>b.onclick=()=>{let selected=+b.dataset.i;document.querySelectorAll('.taskQuiz').forEach(x=>x.classList.toggle('selected',x===b));$('taskDone').disabled=false;$('taskDone').dataset.selected=selected;$('taskDone').dataset.correct=q.correct_index??-999;let msg=selected<0?'Good choice. Review the lesson instead of guessing.':selected===q.correct_index?`Correct. ${q.rationale||''}`:`Not yet. ${Array.isArray(q.feedback)?(q.feedback[selected]||q.rationale||'Re-read the explanation above.'):(q.rationale||'Re-read the explanation above.')}`;if($('taskQuizMsg'))$('taskQuizMsg').textContent=msg;if(selected!==q.correct_index&&Array.isArray(q.misconceptions))$('taskDone').dataset.misconception=q.misconceptions[selected]||''});
    $('taskDone').onclick=()=>completeTask(planIndex)
@@ -670,7 +835,14 @@ async function openTask(planIndex){
 $('closeModal').onclick=()=>$('modal').classList.add('hidden');
 async function completeTask(planIndex){
  let p=todayPlan[planIndex];if(!p)return;let type=p.type,concept=p.route.c,key=`${type}_${concept.key}`,difficulty=conceptDifficulty(concept),score=0,evalMeta=null;let doneBtn=$('taskDone');if(doneBtn){doneBtn.disabled=true;doneBtn.textContent=type==='review'?'Evaluating recall…':'Saving progress…'}
- if(type==='review'){
+ if(type==='synthesis'){
+   let txt=($('synthesisText')?.value||'').trim();if(txt.length<55){if(doneBtn){doneBtn.disabled=false;doneBtn.textContent='Complete today’s application'}return alert('Give the connection a little more thought — about three short sentences is enough.');}
+   let elapsed=Math.max(45,Math.round((Date.now()-taskOpenedAt)/1000));elapsed=Math.min(elapsed,Math.max(600,Math.round((+profile.daily_minutes||30)*60*.45)));
+   let er=await db.from('learning_events').insert({user_id:user.id,concept_key:concept.key,event_type:'synthesis_application',score:null,difficulty:conceptDifficulty(concept),duration_seconds:elapsed,modality:'integrated_application',route_type:'synthesis',provider:'atlas_session',metadata:{version:ATLAS_VERSION,session_arc:sessionArc?.title||null,subjects:sessionArc?.subjects||[],response_length:txt.length}});
+   if(er.error){if(doneBtn){doneBtn.disabled=false;doneBtn.textContent='Retry saving'}setSystemStatus('Atlas could not save today’s integrated application yet. Please retry.','error');return}
+   sessionActiveSeconds+=elapsed;todayDone.add(key);await saveDailyProgress();$('modal').classList.add('hidden');renderToday();
+   if(todayDone.size===todayPlan.length)await finishGuidedSession();return
+ }else if(type==='review'){
    let txt=($('retrieveText')?.value||'').trim(),quality=$('recallQuality')?.value;
    if(txt.length<40){if(doneBtn){doneBtn.disabled=false;doneBtn.textContent='Evaluate retrieval'}return alert('Give Atlas enough recall evidence to work with — about two sentences.');}
 
@@ -709,12 +881,13 @@ async function completeTask(planIndex){
  if(objectId)enrichment.push(db.from('learning_objects').update({completed_at:new Date().toISOString(),quality_score:score}).eq('id',objectId));
  Promise.allSettled(enrichment).then(()=>{});
  $('modal').classList.add('hidden');renderToday();
- if(todayDone.size===todayPlan.length){
-   let actual=Math.max(1,Math.min(profile.daily_minutes,Math.round(sessionActiveSeconds/60)));
-   let r=await db.from('study_sessions').insert({user_id:user.id,planned_minutes:profile.daily_minutes,actual_minutes:actual,session_type:'adaptive_v065_learning',completed:true,completed_at:new Date().toISOString()});
-   if(!r.error){dailySessionComplete=true;guidedSessionActive=false;await saveDailyProgress(true);await loadCore();await syncStreakFromSessions();renderAll();celebrate(actual)}
-   else setSystemStatus('Your lesson evidence was saved, but the session summary did not sync yet. Atlas will retry next time.','warn')
- }
+ if(todayDone.size===todayPlan.length)await finishGuidedSession()
+}
+async function finishGuidedSession(){
+ let actual=Math.max(1,Math.round(sessionActiveSeconds/60));dailySessionComplete=true;guidedSessionActive=false;await saveDailyProgress(true);
+ let r=await persistSessionSummary(actual);
+ if(r.ok){await loadCore();await syncStreakFromSessions();setSystemStatus(coreLoadWarning,coreLoadWarning?'warn':'');renderAll();celebrate(actual)}
+ else{setSystemStatus('Your learning is saved and today is complete. Atlas could not update the streak/minute totals yet, so it will retry automatically.','warn');renderToday()}
 }
 
 
@@ -727,7 +900,7 @@ function renderWeekly(){
 
 document.querySelectorAll('.aiAction').forEach(b=>b.onclick=async()=>{
  if(b.disabled)return;let label=b.textContent;document.querySelectorAll('.aiAction').forEach(x=>x.disabled=true);b.textContent='Building…';
- try{await ai(b.dataset.mode)}catch(err){$('aiOutput').classList.remove('hidden');$('aiOutput').innerHTML=`<p>Frontier tool error: ${err?.message||'Please try again.'}</p>`}
+ try{await ai(b.dataset.mode)}catch(err){$('aiOutput').classList.remove('hidden');$('aiOutput').innerHTML=`<p>Deep Dive error: ${err?.message||'Please try again.'}</p>`}
  finally{document.querySelectorAll('.aiAction').forEach(x=>x.disabled=false);b.textContent=label}
 });
 
@@ -736,9 +909,8 @@ $('newDiscovery').onclick=buildDiscovery;
 $('learnDiscovery').onclick=async()=>{
  if(!activeDiscovery)return;
  let c=activeDiscovery.concept;
- document.querySelector('[data-page="frontier"]').click();
- frontierConcept=c;currentRoute=routeScore(c,'frontier');
- $('frontierCard').innerHTML=`<div class="eyebrow">FROM DISCOVERY TO LEARNING</div><strong>${c.name}</strong><p>${c.description||''}</p><div class="notice">Discovery sparked the connection. This lesson will now teach and test the concept properly.</div>`;
+ openDeepDiveForSubject(c.subject_key,c.key);
+ $('frontierCard').innerHTML=`<div class="eyebrow">FROM DISCOVERY TO LEARNING</div><strong>${c.name}</strong><p>${c.description||''}</p><div class="notice">Discovery sparked the connection. Deep Dive will now teach the concept properly and let you go further.</div>`;
  $('aiOutput').classList.remove('hidden');$('aiOutput').innerHTML='<p>Building the full lesson…</p>';
  let ctx=learnerContextFor(c,'frontier');ctx.mode='lesson';ctx.bridge_from=getSubject(activeDiscovery.source)?.name||activeDiscovery.source;
  let {data,error}=await db.functions.invoke('atlas-ai-content',{body:ctx});
@@ -819,11 +991,11 @@ function renderAccount(){
  if(!$('accountName')||!profile)return;$('accountName').textContent=profile.display_name||user?.user_metadata?.display_name||'Atlas learner';$('accountEmail').textContent=user?.email||'—';$('accountBuild').textContent=ATLAS_VERSION;$('accountMinutes').value=String(profile.daily_minutes||30);$('accountDays').value=String(profile.days_per_week||5);if($('accountGoal'))$('accountGoal').value=profile.learning_goal||''
 }
 
-$('saveLearningGoal').onclick=async()=>{let goal=($('accountGoal')?.value||'').trim(),r=await db.from('profiles').update({learning_goal:goal||null,updated_at:new Date().toISOString()}).eq('user_id',user.id);if(r.error){$('accountMessage').textContent=r.error.message;return}profile.learning_goal=goal||null;if(todayDone.size===0&&!dailySessionComplete){todayPlan=[];guidedSessionActive=false;renderAll()}$('accountMessage').textContent=goal?'Learning goal saved. Atlas rebuilt today’s route around it.':'Learning goal cleared. Atlas will balance breadth, gaps, interests, and frontier.'};
+$('saveLearningGoal').onclick=async()=>{let goal=($('accountGoal')?.value||'').trim(),r=await db.from('profiles').update({learning_goal:goal||null,updated_at:new Date().toISOString()}).eq('user_id',user.id);if(r.error){$('accountMessage').textContent=r.error.message;return}profile.learning_goal=goal||null;if(todayDone.size===0&&!dailySessionComplete){todayPlan=[];sessionArc=null;sessionMode='balanced';guidedSessionActive=false;renderAll()}$('accountMessage').textContent=goal?'Learning goal saved. Atlas rebuilt today’s route around it.':'Learning goal cleared. Atlas will balance breadth, gaps, interests, and frontier.'};
 $('saveAccountSchedule').onclick=async()=>{let daily=+$('accountMinutes').value,days=+$('accountDays').value,r=await db.from('profiles').update({daily_minutes:daily,days_per_week:days,weekly_goal_minutes:daily*days,updated_at:new Date().toISOString()}).eq('user_id',user.id);if(r.error){$('accountMessage').textContent=r.error.message;return}profile.daily_minutes=daily;profile.days_per_week=days;profile.weekly_goal_minutes=daily*days;$('dailyMinutes').textContent=daily;if(todayDone.size===0&&!dailySessionComplete){todayPlan=[];renderAll();$('accountMessage').textContent='Learning schedule saved. Today’s plan has been resized to fit it.'}else $('accountMessage').textContent='Learning schedule saved. Your current in-progress session stays intact; the new timing applies to the next session.'};
 $('sendRecovery').onclick=async()=>{$('accountMessage').textContent='Sending recovery link…';let r=await db.auth.resetPasswordForEmail(user.email,{redirectTo:location.origin+location.pathname});$('accountMessage').textContent=r.error?r.error.message:'Recovery link sent to '+user.email+'.'};
 $('changePassword').onclick=async()=>{let a=$('newPassword').value,b=$('confirmPassword').value;if(a.length<8){$('accountMessage').textContent='Use at least 8 characters.';return}if(a!==b){$('accountMessage').textContent='Passwords do not match.';return}$('accountMessage').textContent='Updating password…';let r=await db.auth.updateUser({password:a});$('accountMessage').textContent=r.error?r.error.message:'Password updated.';if(!r.error){$('newPassword').value='';$('confirmPassword').value='';localStorage.removeItem('atlas_recovery_pending')}};
 
 async function boot(){let u=(await db.auth.getUser()).data.user;if(!u){$('logout').classList.add('hidden');show('auth');return}user=u;$('logout').classList.remove('hidden');let r=await db.from('profiles').select('*').eq('user_id',u.id).single();if(r.error){$('authMessage').textContent='Profile load failed: '+r.error.message;show('auth');return}profile=r.data;if(!profile.onboarding_complete){$('minutes').value=profile.daily_minutes;$('days').value=profile.days_per_week;if($('onboardingGoal'))$('onboardingGoal').value=profile.learning_goal||'';show('onboarding');return}if(!['v0.4','v0.5','v0.6'].includes(profile.placement_version)){assessmentLanding();return}loadApp()}
 mode('signup');boot();
-window.addEventListener('pagehide',()=>{try{if(user&&attempt){let phase=!$('checkpoint').classList.contains('hidden')?'checkpoint':round>3?'open':'questions';localStorage.setItem(progressLocalKey('assessment'),JSON.stringify({attempt,round,qIndex,openIndex,draft:$('openText')?.value||'',phase,saved_at:new Date().toISOString()}))}if(user){let existing=progressCache[dailyProgressKey()]||{};localStorage.setItem(progressLocalKey(dailyProgressKey()),JSON.stringify({...existing,completed:dailySessionComplete||existing.completed||false,guidedSessionActive:!!guidedSessionActive,todayDone:[...todayDone],sessionActiveSeconds,plan:todayPlan.map(p=>({type:p.type,concept_key:p.route.c.key,diagnostic:!!p.route.diagnostic})),saved_at:new Date().toISOString()}))}}catch{}});
+window.addEventListener('pagehide',()=>{try{if(user&&attempt){let phase=!$('checkpoint').classList.contains('hidden')?'checkpoint':round>3?'open':'questions';localStorage.setItem(progressLocalKey('assessment'),JSON.stringify({attempt,round,qIndex,openIndex,draft:$('openText')?.value||'',phase,saved_at:new Date().toISOString()}))}if(user){let existing=progressCache[dailyProgressKey()]||{};localStorage.setItem(progressLocalKey(dailyProgressKey()),JSON.stringify({...existing,plan_version:'v067',completed:dailySessionComplete||existing.completed||false,guidedSessionActive:!!guidedSessionActive,sessionMode,sessionArc,todayDone:[...todayDone],sessionActiveSeconds,plan:todayPlan.map(p=>({type:p.type,concept_key:p.route.c.key,diagnostic:!!p.route.diagnostic,session_role:p.session_role||null,estimated_minutes:p.estimated_minutes||null})),saved_at:new Date().toISOString()}))}}catch{}});

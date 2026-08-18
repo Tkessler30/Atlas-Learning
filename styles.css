@@ -29,3 +29,21 @@ button:disabled{cursor:wait}
 .streak-card{display:flex;justify-content:space-between;gap:1rem;align-items:center;padding:.9rem 1.05rem;margin-bottom:1rem;border:1px solid var(--border);border-radius:16px;background:linear-gradient(135deg,rgba(255,176,32,.12),rgba(73,144,255,.08));}
 .streak-card strong{font-size:1.15rem;margin:0 .3rem}.streak-card small{color:var(--muted);text-align:right}.streak-flame{font-size:1.35rem}.session-start{margin-top:.8rem;min-height:52px;padding-left:1.4rem;padding-right:1.4rem}.session-start:disabled{opacity:.65}.session-preview{cursor:default}.session-preview.current{outline:2px solid rgba(112,169,255,.55);background:rgba(80,139,220,.10)}.session-hero{align-items:flex-start}
 @media(max-width:700px){.streak-card{align-items:flex-start;flex-direction:column}.streak-card small{text-align:left}.session-start{width:100%}.session-hero{display:block}.session-hero .deposit{margin-top:1rem}}
+
+.session-arc-card{background:linear-gradient(145deg,rgba(29,78,216,.08),rgba(14,165,233,.035))}
+.session-arc-card h3{margin:.35rem 0 .55rem}.session-arc-card .notice{margin-top:.8rem}
+.session-deep-dive{margin-left:.55rem;margin-top:.55rem}.session-context{line-height:1.55}
+#lessonReflection,#synthesisText{min-height:120px;width:100%}
+@media(max-width:700px){.session-deep-dive{margin-left:0;width:100%}.session-start{width:100%}.session-arc-card{padding-top:1.15rem}}
+
+.mapSubject{transition:transform .12s ease,background .12s ease;border-radius:14px!important;padding:8px!important;margin-left:-8px!important;width:calc(100% + 16px)!important}
+.mapSubject:active{transform:scale(.995);background:rgba(43,68,103,.25)!important}
+.map-explore-link{color:var(--blue2);font-weight:750}
+.map-insight-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin:14px 0}
+.map-next-move h3{margin:.4rem 0}
+.map-next-move p{margin:.45rem 0 .8rem}
+@media(max-width:700px){.map-insight-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.concept-grid{grid-template-columns:1fr}.mapSubject{padding:10px 6px!important;margin-left:-6px!important;width:calc(100% + 12px)!important}}
+
+.deep-dive-picker{display:block;max-width:520px;margin:1rem 0}
+.deep-dive-picker select{margin-top:.35rem}
+#frontierCard{margin-top:1rem}
