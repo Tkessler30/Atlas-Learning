@@ -1,53 +1,111 @@
-# Atlas Learning v0.6.4 — Flow QA
+# Atlas Learning v0.6.5 — Teaching Overhaul
 
-Major learner-intelligence release built on the 388-concept graph.
+## Why this build exists
 
-Highlights: persistent misconception model, modality-performance adaptation, dynamic session allocation, adaptive retention, richer concept map, post-assessment learner snapshot, Teach Atlas, real-world transfer, Search Your Knowledge, Ask Atlas, Curiosity Queue, visual learning objects, curated media support, connection history, milestones/streaks, weekly/monthly knowledge statements, content-linked feedback, AI-quality telemetry, current-world mode, caching/prefetch, and admin-gated tester analytics.
+Real-device testing of v0.6.4 exposed a core product failure: Atlas could look like a learning app while serving assessment prompts and generic teaching placeholders instead of actual instruction.
 
-See `ROADMAP-v0.6.md` for the full 40-item acceptance checklist.
+The live `learning_objects` records confirmed that the affected lessons were being served by `atlas_fallback`. The fallback text told the learner to "focus on the mechanism," "use a concrete case," or "compare" ideas without actually explaining the subject. That is not acceptable teaching content.
 
-## Final synthetic QA
+v0.6.5 changes the contract of the product: **Atlas must teach before it tests.**
 
-The final routing engine was exercised against 10 synthetic learner archetypes from early-high-school through high-performing adult polymath profiles for 400 thirty-minute sessions each (200 equivalent hours).
+## The new learning loop
 
-After the final pacing tune, over-challenge rates were kept below the 12% release threshold for every profile tested, under-challenge remained below 1.2%, and no learner spent more than ~30% of simulated activity in one subject. The two largest pre-release issues — Medicine over-concentration for the health specialist and excessive stretch for the software-engineer profile — were corrected with recent-subject saturation balancing and recent-performance Frontier backoff.
+For normal Gap / Frontier / lesson work:
 
-This is synthetic code-path QA, not evidence of real educational outcomes. Modality weights, streak feel, session fragmentation, content quality, and mobile ergonomics still require real tester data.
+1. State a concrete learning objective.
+2. Define the key terms.
+3. Teach the actual subject matter and causal/mechanical explanation.
+4. Walk through a worked example.
+5. Explain any real connection precisely, including where the analogy breaks.
+6. Identify common mistakes.
+7. Give a concise takeaway.
+8. Give guided practice.
+9. Only then reveal a short content-specific understanding check.
+10. Give answer-specific feedback.
+11. Schedule retrieval later, only after Atlas actually taught the concept.
 
-## Release notes
+A generic prompt is no longer considered a lesson. If Atlas cannot obtain real instructional material, the UI says the lesson is unavailable rather than disguising a placeholder as instruction.
 
-- Supabase migrations `atlas_v06_learner_intelligence` and `atlas_v06_retention_media_analytics` are live.
-- `atlas-ai-content` Edge Function v3 is ACTIVE with JWT verification.
-- Curated-media infrastructure is live with a starter catalog; it is not yet a comprehensive media library.
-- Tester analytics are admin-gated; an Atlas admin must be explicitly enrolled before cross-user analytics are visible.
+## Concrete curriculum included in the frontend
 
+`core-lessons.js` contains 17 authored lessons that work even when the personalized AI provider is unavailable.
 
-## v0.6.4 flow audit
+### Complete Economics ladder (12 / 12 routable Economics skills)
 
-This build includes the consolidated flow/reliability fixes found during the final product audit:
+- Scarcity & Opportunity Cost
+- Supply & Demand
+- Elasticity
+- Market Structures
+- Externalities & Public Goods
+- Labor Markets
+- Money & Banking
+- Inflation & Unemployment
+- Fiscal Policy
+- Monetary Policy
+- International Trade
+- Economic Growth
 
-- Exact assessment checkpoint/back/resume state and open-response draft autosave.
-- Immediate answer-selection feedback with double-submit protection.
-- “I don’t know” throughout assessment and adaptive checks.
-- Learning-first flow before non-diagnostic checks.
-- Frontier button wiring and visible loading/error states.
-- Discovery renderer, purpose, finite behavior, no-mastery integrity, lesson handoff, and curiosity save.
-- Account page, recovery email, password change, and schedule editing.
-- Duplicate Weekly/Forecast DOM ID fixed.
-- Live Supabase permissions corrected for v0.6 learner-history tables.
-- Concept mastery scale corrected to 0–100 and `evidence` source allowed.
-- Idempotent mastery evidence saves and safer retry behavior.
-- Core mastery saves are required before a task counts complete; background telemetry no longer blocks the UI.
-- Prefetch deduplication and bounded history loads.
-- Search/Teach Atlas common-language concept aliases.
-- Time-adaptive session shape: 10 min=2 blocks, 15=3, 30=4, 45–60=5, 90–120=6.
-- Today summary now describes the actual allocation.
-- RLS hot-path cleanup and assessment/evidence indexes.
+### Additional authored foundations
 
-### Automated UI smoke results
+- Accounting Equation
+- Balance Sheet
+- Gene Expression
+- Claims & Evidence
+- Correlation vs Causation
 
-Authenticated mocked-browser flow passed: Today, Weekly, Portfolio, Knowledge Map, Frontier, Discovery, Explore, Insights, Forecast, Account, Feedback, Frontier content, IDK, Ask Atlas, Teach Atlas, real-world challenge, recovery, learning-before-check, and mobile-width rendering. Zero page/console errors in the success path.
+Each authored lesson contains substantive explanation, key terms, a worked example, a structured connection, common mistakes, a takeaway, guided practice, and a content-specific quiz with feedback.
 
-Assessment mocked-browser flow passed: assessment/calculator/lookup guidance, IDK, immediate answer feedback with an artificial 700 ms network delay, Back, saved-answer editing, checkpoint review, exact checkpoint resume, and Round 2 transition. Zero page/console errors.
+## Personalized / unseeded content
 
-Failure-mode test passed: a forced mastery-save failure kept the modal open and the session at 0/4; a successful retry then advanced it to 1/4.
+The live Supabase Edge Function `atlas-ai-content` is version 4. Its lesson prompt now enforces a real-teaching schema instead of accepting generic pedagogy. If the personalized provider is unavailable, the function tries a clearly attributed open-educational background source for unseeded concepts. Such material is recorded as exposure only unless it has a validated concept-specific check.
+
+The v0.6.4 real-device session showed that the live function was taking its no-provider fallback path. Full personalized generation across all ~351 routable concepts therefore still requires the OpenAI API secret to be configured in Supabase. v0.6.5 does not hide that infrastructure state from the learner.
+
+## Daily-session changes
+
+- A first learning session is now dominated by actual lessons, not retrieval or map probes.
+- Retrieval is eligible only for a concept Atlas previously taught with non-fallback content.
+- A completed daily session stays complete for the local day.
+- Finishing 4 / 4 no longer silently creates another daily assessment/plan.
+- Daily progress is restored on reload; v0.6.4 had a restore function that was not actually called.
+- The v0.6.5 daily progress key is versioned so a tester does not inherit a broken v0.6.4 plan.
+- Normal lesson blocks show the lesson before the quiz. The quiz is hidden until the learner chooses **I learned this — check my understanding**.
+- “I don’t know yet” remains available to prevent forced guessing.
+
+## Connection changes
+
+“Why this connects” must now explain:
+
+- the exact shared mechanism;
+- how that mechanism works in the target concept;
+- where the analogy or connection breaks;
+- why the connection helps the learner reason.
+
+Same-subject fallback connections such as “connect Economics to Fiscal Policy” are no longer treated as cross-domain bridges.
+
+## Live backend changes already applied
+
+- `atlas-ai-content` Edge Function v4 is ACTIVE with JWT verification.
+- Generic `atlas_fallback` learning objects cached from v0.6.4 were deleted from the live database.
+- v4 refuses to create a generic diagnostic probe, Discovery connection, current-world explanation, or transfer challenge when the appropriate provider is unavailable.
+- v4 includes concrete built-in lessons for several high-use concepts and can return open educational background for unseeded stable topics.
+
+## Files
+
+- `index.html`
+- `styles.css`
+- `atlas-client.js`
+- `core-lessons.js`
+- `app.js`
+- `QA-v0.6.5.md`
+- `ROADMAP-v0.6.md`
+
+## Deployment acceptance test
+
+After this exact frontend is uploaded to GitHub Pages, use a real signed-in tester account and verify:
+
+1. Open **Frontier → Teach me** on Fiscal Policy. It should begin with real definitions/explanation and the $40B infrastructure worked example, not “focus on the mechanism.”
+2. Start Today. A first 30-minute session should contain learning blocks and teach before checking.
+3. Complete all four blocks. Today must remain **Session complete** rather than generating another plan.
+4. Reload the page. Today’s completion/progress must still be present.
+5. Open a lesson that is not in `core-lessons.js`. Atlas may serve attributed open educational material, but must not show a generic pseudo-lesson.

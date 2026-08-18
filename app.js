@@ -1,14 +1,15 @@
 const URL='https://fhjutbhyvaamzzsipwaa.supabase.co';
 const KEY='sb_publishable_Ytbw_MTkDIhZP1KerZ4bAw_P7XPwFH_';
 const db=window.createAtlasClient(URL,KEY);
-const ATLAS_VERSION='v0.6.4',ATLAS_BUILD='2026.08.18';
+const CORE_LESSONS=window.ATLAS_CORE_LESSONS||{};
+const ATLAS_VERSION='v0.6.5',ATLAS_BUILD='2026.08.18';
 window.addEventListener('error',e=>{
   const msg='Atlas hit an unexpected screen error. Your saved progress is not erased.';
   const status=document.getElementById('systemStatus'),auth=document.getElementById('authMessage');
   if(status&&!status.classList.contains('hidden')||document.getElementById('app')&&!document.getElementById('app').classList.contains('hidden')){if(status){status.textContent=msg;status.classList.remove('hidden');status.classList.add('status-error')}}else if(auth)auth.textContent=msg;
 });
 const $=id=>document.getElementById(id);
-let authMode='signup',user=null,profile=null,subjects=[],concepts=[],states=[],sessions=[],masteries=[],interests=[],prereqs=[],events=[],attempt=null,round=1,qIndex=0,answers=[],roundQs=[],openIndex=0,todayDone=new Set(),frontierConcept=null,currentRoute=null,todayPlan=[],taskOpenedAt=0,sessionActiveSeconds=0,activityBySubject={},activityByConcept={},misconceptions=[],modalityPerf=[],curiosityQueue=[],learningObjects=[],connections=[],milestones=[],curatedMedia=[],activeLearningObject=null,assessmentBusy=false,progressCache={},activeDiscovery=null,discoverySeen=new Set(),prefetchInFlight=new Set(),coreLoadWarning='';
+let authMode='signup',user=null,profile=null,subjects=[],concepts=[],states=[],sessions=[],masteries=[],interests=[],prereqs=[],events=[],attempt=null,round=1,qIndex=0,answers=[],roundQs=[],openIndex=0,todayDone=new Set(),frontierConcept=null,currentRoute=null,todayPlan=[],dailySessionComplete=false,taskOpenedAt=0,sessionActiveSeconds=0,activityBySubject={},activityByConcept={},misconceptions=[],modalityPerf=[],curiosityQueue=[],learningObjects=[],connections=[],milestones=[],curatedMedia=[],activeLearningObject=null,assessmentBusy=false,progressCache={},activeDiscovery=null,discoverySeen=new Set(),prefetchInFlight=new Set(),coreLoadWarning='';
 const VIEWS=['auth','onboarding','assessmentIntro','assessment','checkpoint','app'];
 const EXTRA=['Science','Health & Medicine','Trades & Construction','Business & Leadership','Accounting & Economics','Technology & AI','History & Geopolitics','Psychology & Philosophy','Arts & Culture'];
 
@@ -110,14 +111,15 @@ async function getProgressState(key){
  if(user){let r=await db.from('user_progress').select('*').eq('user_id',user.id).eq('progress_key',key).single();if(!r.error&&r.data?.state){progressCache[key]=r.data.state;return r.data.state}}
  progressCache[key]=local||null;return progressCache[key]
 }
-function dailyProgressKey(){return `daily_session_${new Date().toISOString().slice(0,10)}`}
-async function saveDailyProgress(){
+function localDayKey(){let d=new Date(),y=d.getFullYear(),m=String(d.getMonth()+1).padStart(2,'0'),day=String(d.getDate()).padStart(2,'0');return `${y}-${m}-${day}`}
+function dailyProgressKey(){return `daily_learning_v065_${localDayKey()}`}
+async function saveDailyProgress(completed=dailySessionComplete){
  if(!user)return;
- await saveProgressState(dailyProgressKey(),{completed:false,todayDone:[...todayDone],sessionActiveSeconds,plan:todayPlan.map(p=>({type:p.type,concept_key:p.route.c.key,diagnostic:!!p.route.diagnostic}))})
+ await saveProgressState(dailyProgressKey(),{completed:!!completed,todayDone:[...todayDone],sessionActiveSeconds,plan:todayPlan.map(p=>({type:p.type,concept_key:p.route.c.key,diagnostic:!!p.route.diagnostic}))})
 }
 async function restoreDailyProgress(){
- let s=await getProgressState(dailyProgressKey());if(!s||s.completed)return;
- todayDone=new Set(s.todayDone||[]);sessionActiveSeconds=+s.sessionActiveSeconds||0;
+ let s=await getProgressState(dailyProgressKey());if(!s)return;
+ dailySessionComplete=!!s.completed;todayDone=new Set(s.todayDone||[]);sessionActiveSeconds=+s.sessionActiveSeconds||0;
  if(Array.isArray(s.plan)&&s.plan.length){
   let restored=s.plan.map(x=>{let c=conceptByKey(x.concept_key);if(!c)return null;let mode=x.type==='gap'?'gap':x.type==='bridge'?'bridge':x.type==='review'?'review':'frontier',route=routeScore(c,mode);route.diagnostic=!!x.diagnostic;return {type:x.type,route}}).filter(Boolean);
   if(restored.length===s.plan.length)todayPlan=restored
@@ -226,6 +228,7 @@ const verified=s=>(+s.estimated_level)*(+s.estimate_confidence)/100;
 function getSubject(k){return subjects.find(x=>x.key===k)}
 function conceptMastery(k){return masteries.find(m=>m.concept_key===k)}
 function conceptByKey(k){return concepts.find(c=>c.key===k)}
+function coreLessonFor(c){let x=c&&CORE_LESSONS[c.key];return x?JSON.parse(JSON.stringify(x)):null}
 function placementState(k){return states.find(x=>x.subject_key===k)}
 function globalPlacementAbility(){
  let vals=states.filter(s=>(+s.estimate_confidence)>=45).map(s=>+s.estimated_level).sort((a,b)=>a-b);
@@ -328,20 +331,29 @@ function routeScore(c,mode='general'){
  return {c,score,reasons,e,m,diagnostic}
 }
 function pickCandidate(mode,exclude=new Set(),excludedSubjects=new Set(),requireBridge=false){
- let list=concepts.filter(c=>c.subject_key!=='hvac'&&!exclude.has(c.key)&&!excludedSubjects.has(c.subject_key)).map(c=>routeScore(c,mode)).filter(x=>x.score>-9000&&(!requireBridge||x.reasons.some(r=>r.startsWith('bridge from')))).sort((a,b)=>b.score-a.score);
+ let list=concepts.filter(c=>c.subject_key!=='hvac'&&!exclude.has(c.key)&&!excludedSubjects.has(c.subject_key)).map(c=>{let x=routeScore(c,mode);if(CORE_LESSONS[c.key]&&mode!=='review')x.score+=completedAtlasLessons()<12?28:10;return x}).filter(x=>x.score>-9000&&(!requireBridge||x.reasons.some(r=>r.startsWith('bridge from')))).sort((a,b)=>b.score-a.score);
+ return list[0]||null
+}
+function atlasTaughtConcept(key){
+ return learningObjects.some(x=>x.concept_key===key&&x.completed_at&&!['review','probe'].includes(x.route_type)&&x.provider!=='atlas_fallback') || events.some(e=>e.concept_key===key&&e.provider!=='atlas_fallback'&&['lesson','quiz','assignment'].includes(e.event_type));
+}
+function dueLearnedReviews(){return masteries.filter(m=>m.next_review_at&&new Date(m.next_review_at)<=new Date()&&atlasTaughtConcept(m.concept_key))}
+function completedAtlasLessons(){return learningObjects.filter(x=>x.completed_at&&!['review','probe'].includes(x.route_type)&&x.provider!=='atlas_fallback').length}
+function foundationTeachingCandidate(exclude=new Set()){
+ let list=concepts.filter(c=>!exclude.has(c.key)&&(+c.level||1)<=2&&prereqs.filter(p=>p.concept_key===c.key).every(prereqSatisfied)).map(c=>({c,score:(30-(activityBySubject[c.subject_key]||0)*.25)+(interestKeys().has(c.subject_key)?8:0)+(CORE_LESSONS[c.key]?35:0)-recentCount(c.key,14)*18,reasons:['foundation lesson'],e:subjectEvidence(c.subject_key),m:conceptMastery(c.key),diagnostic:false})).sort((a,b)=>b.score-a.score);
  return list[0]||null
 }
 function sessionBlockCount(){let m=+profile?.daily_minutes||30;if(m<=10)return 2;if(m<=15)return 3;if(m<=30)return 4;if(m<=60)return 5;return 6}
 function sessionAllocation(){
  let evidences=subjects.map(s=>subjectEvidence(s.key)),avgConf=evidences.length?evidences.reduce((a,e)=>a+(e.confidence||0),0)/evidences.length:0,measured=evidences.filter(e=>e.confidence>=35),weakest=measured.length?Math.min(...measured.map(e=>e.ability)):0;
- let due=masteries.filter(m=>m.next_review_at&&new Date(m.next_review_at)<=new Date()).length,verified=masteries.filter(verifiedConcept).length,n=sessionBlockCount(),base;
- if(avgConf<28)base=['gap','frontier','gap','bridge'];
- else if(due>=3)base=['review','review',weakest<60?'gap':'frontier','frontier'];
- else if(verified>=80||weakest>=65)base=['review','frontier','frontier','bridge'];
- else base=['review','gap','frontier','bridge'];
- if(n===2)return avgConf<28?['gap','frontier']:[due? 'review':(weakest<60?'gap':'frontier'),'frontier'];
- if(n===3)return [base[0],base[1],base[2]];
- while(base.length<n)base.push(base.length%2===0?(due>4?'review':'frontier'):(weakest<55?'gap':'bridge'));
+ let due=dueLearnedReviews().length,n=sessionBlockCount(),base;
+ // Daily sessions are for learning. Retrieval appears only when Atlas has actually taught the concept before.
+ if(n===2)base=['gap','frontier'];
+ else if(n===3)base=['gap','frontier',due?'review':'bridge'];
+ else base=['gap','frontier','bridge',due?'review':'frontier'];
+ while(base.length<n)base.push(base.length%3===0&&due?'review':(weakest<55?'gap':'frontier'));
+ // A placement assessment already happened. Do not turn the first learning session into another battery of probes.
+ if(completedAtlasLessons()<3)base=base.map(x=>['review','bridge'].includes(x)?'frontier':x);
  return base.slice(0,n)
 }
 function chooseSessionPlan(){
@@ -349,17 +361,22 @@ function chooseSessionPlan(){
  const add=(type)=>{
   let excludedSubjects=type==='bridge'?new Set(plan.map(x=>x.route.c.subject_key)):new Set(),route=null;
   if(type==='review'){
-   route=concepts.map(c=>routeScore(c,'review')).filter(x=>x.m&&x.m.next_review_at&&new Date(x.m.next_review_at)<=new Date()).sort((a,b)=>b.score-a.score)[0];
-   if(!route){let candidates=concepts.filter(c=>subjectEvidence(c.subject_key).confidence>=35&&(+c.level)<=Math.max(1,Math.floor(subjectBoundary(c.subject_key)))&&prereqs.filter(p=>p.concept_key===c.key).every(prereqSatisfied)&&!used.has(c.key)).map(c=>{let last=events.filter(e=>e.concept_key===c.key).slice(-1)[0],days=last?Math.max(0,(Date.now()-new Date(last.created_at).getTime())/864e5):30,near=Math.abs((+c.level)-Math.max(1,Math.floor(subjectBoundary(c.subject_key))));let rs=recentSubjectStats(c.subject_key),balancePenalty=rs.share>.28?Math.min(35,(rs.share-.28)*130):0;return {c,score:Math.min(30,days)*2-near*7-recentCount(c.key,7)*18+subjectEvidence(c.subject_key).ability*.12-balancePenalty,reasons:['rotating retrieval',...(balancePenalty?['breadth balance']:[])],e:subjectEvidence(c.subject_key),m:conceptMastery(c.key)}}).sort((a,b)=>b.score-a.score);route=candidates[0]||null}
-  }else route=pickCandidate(type,used,excludedSubjects,type==='bridge');
-  if(!route)route=pickCandidate(type==='bridge'?'frontier':'general',used);
-  if(route){plan.push({type:type==='gap'?'gap':type,route});used.add(route.c.key)}
+   route=concepts.map(c=>routeScore(c,'review')).filter(x=>x.m&&x.m.next_review_at&&new Date(x.m.next_review_at)<=new Date()&&atlasTaughtConcept(x.c.key)).sort((a,b)=>b.score-a.score)[0]||null;
+   if(!route)type='frontier';
+  }
+  if(!route&&type==='gap'){
+   route=pickCandidate('gap',used,excludedSubjects,false);
+   if(route?.diagnostic)route=foundationTeachingCandidate(used);
+  }
+  if(!route&&type!=='review')route=pickCandidate(type,used,excludedSubjects,type==='bridge');
+  if(!route)route=foundationTeachingCandidate(used)||pickCandidate('general',used);
+  if(route){plan.push({type:type==='review'?'review':type,route});used.add(route.c.key)}
  };
  types.forEach(add);while(plan.length<types.length)add('frontier');return plan.slice(0,types.length)
 }
 function getFrontier(){let pick=pickCandidate('frontier')||pickCandidate('general')||{};frontierConcept=pick.c||concepts[0];let subject=getSubject(frontierConcept?.subject_key),state=states.find(x=>x.subject_key===subject?.key);currentRoute=pick;return {subject,state,concept:frontierConcept,reasons:pick.reasons||[],score:pick.score||0}}
-async function loadApp(){show('app');$('logout').classList.remove('hidden');$('dailyMinutes').textContent=profile.daily_minutes;try{await loadCore()}catch(err){setSystemStatus(err?.message||'Atlas could not load your learning map.','error');return}setSystemStatus(coreLoadWarning,coreLoadWarning?'warn':'');renderAll();if(localStorage.getItem('atlas_show_snapshot')==='1'){localStorage.removeItem('atlas_show_snapshot');let ranked=subjects.map(s=>({s,e:subjectEvidence(s.key)})).filter(x=>x.e.known).sort((a,b)=>b.e.ability-a.e.ability),strong=ranked[0],weak=ranked.filter(x=>x.e.confidence>=35).sort((a,b)=>a.e.ability-b.e.ability)[0],uncertain=subjects.map(s=>({s,e:subjectEvidence(s.key)})).filter(x=>x.e.confidence<35).slice(0,5);$('modalBody').innerHTML=`<div class="eyebrow">YOUR FIRST KNOWLEDGE MAP</div><h2>Here’s what Atlas learned about you.</h2><p><strong>Strongest signal:</strong> ${strong?.s.name||'still forming'}.</p><p><strong>Largest measured gap:</strong> ${weak?.s.name||'not enough evidence yet'}.</p><p><strong>Still uncertain:</strong> ${uncertain.map(x=>x.s.name).join(', ')||'very little'}.</p><div class="notice">This is a starting model, not a permanent label. Every session can move it.</div><button id="snapshotContinue" class="primary">Start my first adaptive session</button>`;$('modal').classList.remove('hidden');$('snapshotContinue').onclick=()=>$('modal').classList.add('hidden')}}
-function renderAll(){if(!todayPlan.length)todayPlan=chooseSessionPlan();renderLearnerSnapshot();renderMap();renderPortfolio();renderForecast();renderToday();renderFrontier();renderWeekly();renderDiscovery();renderExplore();renderInsights();renderBuild();checkMilestones()}
+async function loadApp(){show('app');$('logout').classList.remove('hidden');$('dailyMinutes').textContent=profile.daily_minutes;try{await loadCore();await restoreDailyProgress()}catch(err){setSystemStatus(err?.message||'Atlas could not load your learning map.','error');return}setSystemStatus(coreLoadWarning,coreLoadWarning?'warn':'');renderAll();if(localStorage.getItem('atlas_show_snapshot')==='1'){localStorage.removeItem('atlas_show_snapshot');let ranked=subjects.map(s=>({s,e:subjectEvidence(s.key)})).filter(x=>x.e.known).sort((a,b)=>b.e.ability-a.e.ability),strong=ranked[0],weak=ranked.filter(x=>x.e.confidence>=35).sort((a,b)=>a.e.ability-b.e.ability)[0],uncertain=subjects.map(s=>({s,e:subjectEvidence(s.key)})).filter(x=>x.e.confidence<35).slice(0,5);$('modalBody').innerHTML=`<div class="eyebrow">YOUR FIRST KNOWLEDGE MAP</div><h2>Here’s what Atlas learned about you.</h2><p><strong>Strongest signal:</strong> ${strong?.s.name||'still forming'}.</p><p><strong>Largest measured gap:</strong> ${weak?.s.name||'not enough evidence yet'}.</p><p><strong>Still uncertain:</strong> ${uncertain.map(x=>x.s.name).join(', ')||'very little'}.</p><div class="notice">This is a starting model, not a permanent label. Every session can move it.</div><button id="snapshotContinue" class="primary">Start my first adaptive session</button>`;$('modal').classList.remove('hidden');$('snapshotContinue').onclick=()=>$('modal').classList.add('hidden')}}
+function renderAll(){if(!todayPlan.length&&!dailySessionComplete)todayPlan=chooseSessionPlan();renderLearnerSnapshot();renderMap();renderPortfolio();renderForecast();renderToday();renderFrontier();renderWeekly();renderDiscovery();renderExplore();renderInsights();renderBuild();checkMilestones()}
 
 function discoveryCandidates(){
  let strong=subjects.map(s=>({s,e:subjectEvidence(s.key)}))
@@ -398,10 +415,11 @@ async function buildDiscovery(){
    let ctx=learnerContextFor(c,'discovery');ctx.mode='discovery';ctx.bridge_from=from;ctx.minutes=3;
    let {data,error}=await db.functions.invoke('atlas-ai-content',{body:ctx});
    if(error||!data)throw new Error(error?.message||'Discovery unavailable');
+   if(data.provider==='atlas_fallback'||data.content_status==='unavailable')throw new Error(data.note||'Atlas does not have a real cross-domain explanation available right now.');
    activeDiscovery={concept:c,source:pick.source,data};discoverySeen.add(c.key);
    await saveLearningObject(c,'discovery',data,conceptDifficulty(c));
    await db.from('learning_events').insert({user_id:user.id,concept_key:c.key,event_type:'discovery_view',score:null,difficulty:conceptDifficulty(c),duration_seconds:0,modality:data.modality||'discovery',route_type:'discovery',provider:data.provider||'unknown',bridge_source:pick.source,metadata:{version:ATLAS_VERSION,non_mastery:true}});
-   $('discoveryCard').innerHTML=`<div class="eyebrow">CONNECTION DISCOVERED · ${from} → ${to}</div><h3>${data.title||c.name}</h3>${data.hook?`<div class="notice">${data.hook}</div>`:''}<p>${data.explanation||''}</p>${renderVisual(data)}${data.connection?`<div class="ai-section"><strong>The shared mechanism</strong><p>${data.connection}</p></div>`:''}<div class="ai-section"><strong>Why Atlas showed you this</strong><p>You have demonstrated strength in ${from}. Atlas is using that as scaffolding to make ${to} easier to enter without pretending you already know it.</p></div><p class="fineprint">This discovery created no mastery credit. Learning it deeply requires a lesson and later retrieval.</p>`;
+   $('discoveryCard').innerHTML=`<div class="eyebrow">CONNECTION DISCOVERED · ${from} → ${to}</div><h3>${data.title||c.name}</h3>${data.hook?`<div class="notice">${data.hook}</div>`:''}${renderTextBlock(data.explanation||'')}${renderVisual(data)}${renderConnection(data)}<div class="ai-section"><strong>Why Atlas showed you this</strong><p>You have demonstrated strength in ${from}. Atlas is using that as scaffolding to make ${to} easier to enter without pretending you already know it.</p></div><p class="fineprint">This discovery created no mastery credit. Learning it deeply requires a lesson and later retrieval.</p>`;
    $('learnDiscovery').classList.remove('hidden');$('saveDiscoveryCuriosity').classList.remove('hidden');
    $('discoveryStatus').textContent='One connection, then stop. Choose whether to learn it, save it, or move on.'
  }catch(err){
@@ -446,24 +464,29 @@ function renderForecast(){
 }
 function taskLabel(p){
  let c=p.route.c,s=getSubject(c.subject_key)?.name||c.subject_key;
- if(p.type==='review')return ['Retrieval review',`${s}: ${c.name}`,'Retain'];
- if(p.type==='gap'&&p.route.diagnostic)return ['Map probe',`${s}: ${c.name}`,'Probe'];
- if(p.type==='gap')return ['Close a gap',`${s}: ${c.name}`,'Gap'];
- if(p.type==='bridge')return ['Build a bridge',`${s}: ${c.name}`,'Bridge'];
- return ['Push your frontier',`${s}: ${c.name}`,'Frontier']
+ if(p.type==='review')return ['Review something you learned',`${s}: ${c.name}`,'Review'];
+ if(p.type==='gap'&&p.route.diagnostic)return ['Quick calibration',`${s}: ${c.name}`,'Calibrate'];
+ if(p.type==='gap')return ['Learn a foundation',`${s}: ${c.name}`,'Learn'];
+ if(p.type==='bridge')return ['Connection lesson',`${s}: ${c.name}`,'Learn'];
+ return ['Learn the next concept',`${s}: ${c.name}`,'Learn']
 }
 function renderToday(){
  let now=new Date(),m=sessions.filter(s=>s.completed&&new Date(s.completed_at||s.created_at).getMonth()===now.getMonth()&&new Date(s.completed_at||s.created_at).getFullYear()===now.getFullYear()).reduce((a,s)=>a+(s.actual_minutes||0),0);$('monthMinutes').textContent=m;
- if(!todayPlan.length)todayPlan=chooseSessionPlan();
+ if(!todayPlan.length&&!dailySessionComplete)todayPlan=chooseSessionPlan();
+ if(dailySessionComplete){
+   $('todaySummary').textContent='Today’s planned learning session is complete. Atlas will not silently start another daily assessment. Your next planned session begins on the next study day.';
+   $('todayItems').innerHTML=todayPlan.map((p,i)=>{let [title,sub]=taskLabel(p);return `<div class="task done"><div><strong>${title}</strong><small>${sub}</small></div><span>✓</span></div>`}).join('')+`<div class="notice"><strong>Done for today.</strong> Frontier, Discovery, and Explore remain available for optional learning, but they do not restart your daily plan.</div>`;
+   $('allocationSummary').innerHTML='<span class="allocation-chip">Session complete</span>';$('sessionDone').textContent=`${todayPlan.length} / ${todayPlan.length} complete`;return
+ }
  let summaryParts=[],firstByType=t=>todayPlan.find(x=>x.type===t);
  let reviewP=firstByType('review'),gapP=firstByType('gap'),frontP=firstByType('frontier'),bridgeP=firstByType('bridge');
- if(reviewP)summaryParts.push(`protecting ${getSubject(reviewP.route.c.subject_key)?.name||'retained knowledge'}`);
- if(gapP)summaryParts.push(`${gapP.route.diagnostic?'mapping uncertainty in':'strengthening'} ${getSubject(gapP.route.c.subject_key)?.name||'a foundation'}`);
- if(frontP)summaryParts.push(`pushing your frontier in ${getSubject(frontP.route.c.subject_key)?.name||'a strong area'}`);
- if(bridgeP)summaryParts.push(`connecting into ${getSubject(bridgeP.route.c.subject_key)?.name||'another field'}`);
- $('todaySummary').textContent=`Today Atlas is ${summaryParts.length===1?summaryParts[0]:summaryParts.slice(0,-1).join(', ')+(summaryParts.length>1?' and '+summaryParts.at(-1):'')}. The mix changes as your evidence and available time change.`;
- $('todayItems').innerHTML=todayPlan.map((p,i)=>{let [title,sub,badge]=taskLabel(p),key=`${p.type}_${p.route.c.key}`;return `<button class="task ${todayDone.has(key)?'done':''}" data-plan="${i}"><div><strong>${title}</strong><small>${sub} · ${p.route.reasons.slice(0,2).join(', ')||'adaptive priority'}</small></div><span>${todayDone.has(key)?'✓':badge+' ›'}</span></button>`}).join('');
- $('allocationSummary').innerHTML=sessionAllocation().map(x=>`<span class="allocation-chip">${x==='review'?'Retain':x[0].toUpperCase()+x.slice(1)}</span>`).join('');$('sessionDone').textContent=`${todayDone.size} / ${todayPlan.length} complete`;document.querySelectorAll('.task').forEach(b=>b.onclick=()=>openTask(+b.dataset.plan));setTimeout(prefetchLearningObject,250)
+ if(gapP)summaryParts.push(`a foundation lesson in ${getSubject(gapP.route.c.subject_key)?.name||'a core area'}`);
+ if(frontP)summaryParts.push(`a next-step lesson in ${getSubject(frontP.route.c.subject_key)?.name||'your frontier'}`);
+ if(bridgeP)summaryParts.push(`a connection lesson into ${getSubject(bridgeP.route.c.subject_key)?.name||'another field'}`);
+ if(reviewP)summaryParts.push(`a short review of something Atlas previously taught you`);
+ $('todaySummary').textContent=`This is a learning session, not another placement test. Your ${profile.daily_minutes}-minute plan contains ${summaryParts.join(', ')}. Each learning block teaches the idea before it checks understanding.`;
+ $('todayItems').innerHTML=todayPlan.map((p,i)=>{let [title,sub,badge]=taskLabel(p),key=`${p.type}_${p.route.c.key}`;return `<button class="task ${todayDone.has(key)?'done':''}" data-plan="${i}" ${todayDone.has(key)?'disabled':''}><div><strong>${title}</strong><small>${sub} · ${p.route.reasons.slice(0,2).join(', ')||'adaptive priority'}</small></div><span>${todayDone.has(key)?'✓':badge+' ›'}</span></button>`}).join('');
+ $('allocationSummary').innerHTML=sessionAllocation().map(x=>`<span class="allocation-chip">${x==='review'?'Review':'Learn'}</span>`).join('');$('sessionDone').textContent=`${todayDone.size} / ${todayPlan.length} complete`;document.querySelectorAll('.task[data-plan]').forEach(b=>b.onclick=()=>openTask(+b.dataset.plan));setTimeout(prefetchLearningObject,250)
 }
 function renderFrontier(){
  let top=pickCandidate('frontier')||pickCandidate('general'),f=top?{concept:top.c,subject:getSubject(top.c.subject_key),reasons:top.reasons}:getFrontier(),e=subjectEvidence(f.subject?.key);
@@ -479,8 +502,8 @@ function recentAIContext(limit=8){
  return events.slice(0,limit).map(e=>({type:e.event_type,score:+e.score||0,concept:e.concept_key,subject:conceptByKey(e.concept_key)?.subject_key||''}))
 }
 function learnerContextFor(concept,routeType){
- let e=subjectEvidence(concept.subject_key),m=conceptMastery(concept.key),strong=strongestKnownSubject(),bridgeFrom=bridgeSource(concept),mods=modalityPerf.slice().sort((a,b)=>(+b.avg_score+ +b.transfer_score+ +b.delayed_retention)-(+a.avg_score+ +a.transfer_score+ +a.delayed_retention)),activeMis=misconceptions.filter(x=>x.concept_key===concept.key&&!x.resolved_at).slice(0,4);
- return {route_type:routeType,subject:getSubject(concept.subject_key)?.name||concept.subject_key,concept:concept.name,difficulty:conceptDifficulty(concept),estimated_level:e.ability,estimate_confidence:e.confidence,concept_mastery:m?+m.mastery:null,retention_probability:m?+m.retention_probability:null,forgetting_rate:m?+m.forgetting_rate:null,transfer_score:m?+m.transfer_score:null,interests:[...interestKeys()],strong_subject:strong?.name||null,bridge_from:bridgeFrom?getSubject(bridgeFrom)?.name||bridgeFrom:null,recent_results:recentAIContext(),preferred_modalities:mods.slice(0,3).map(x=>({modality:x.modality,score:+x.avg_score,retention:+x.delayed_retention,transfer:+x.transfer_score})),misconceptions:activeMis.map(x=>({code:x.code,description:x.description,severity:+x.severity})),minutes:Math.max(4,Math.round(profile.daily_minutes/Math.max(1,sessionBlockCount())))}
+ let e=subjectEvidence(concept.subject_key),m=conceptMastery(concept.key),strong=strongestKnownSubject(),bridgeFrom=bridgeSource(concept);if(bridgeFrom===concept.subject_key)bridgeFrom=null;let mods=modalityPerf.slice().sort((a,b)=>(+b.avg_score+ +b.transfer_score+ +b.delayed_retention)-(+a.avg_score+ +a.transfer_score+ +a.delayed_retention)),activeMis=misconceptions.filter(x=>x.concept_key===concept.key&&!x.resolved_at).slice(0,4);
+ return {route_type:routeType,subject:getSubject(concept.subject_key)?.name||concept.subject_key,concept:concept.name,concept_key:concept.key,difficulty:conceptDifficulty(concept),estimated_level:e.ability,estimate_confidence:e.confidence,concept_mastery:m?+m.mastery:null,retention_probability:m?+m.retention_probability:null,forgetting_rate:m?+m.forgetting_rate:null,transfer_score:m?+m.transfer_score:null,interests:[...interestKeys()],strong_subject:strong?.key!==concept.subject_key?(strong?.name||null):null,bridge_from:bridgeFrom?getSubject(bridgeFrom)?.name||bridgeFrom:null,prerequisite_path:prereqs.filter(p=>p.concept_key===concept.key).map(p=>conceptByKey(p.prerequisite_key)?.name).filter(Boolean),recent_results:recentAIContext(),preferred_modalities:mods.slice(0,3).map(x=>({modality:x.modality,score:+x.avg_score,retention:+x.delayed_retention,transfer:+x.transfer_score})),misconceptions:activeMis.map(x=>({code:x.code,description:x.description,severity:+x.severity})),minutes:Math.max(4,Math.round(profile.daily_minutes/Math.max(1,sessionBlockCount())))}
 }
 
 
@@ -566,6 +589,13 @@ async function updateStreak(){
 
 
 function curatedMediaFor(conceptKey){return curatedMedia.filter(x=>x.concept_key===conceptKey).slice(0,3)}
+function renderTextBlock(v){if(!v)return '';if(Array.isArray(v))return `<ul>${v.map(x=>`<li>${typeof x==='string'?x:(x.text||x.detail||'')}</li>`).join('')}</ul>`;return String(v).split(/\n{2,}/).map(x=>`<p>${x}</p>`).join('')}
+function renderKeyTerms(d){let a=d?.key_terms||[];if(!Array.isArray(a)||!a.length)return '';return `<div class="ai-section"><strong>Key terms</strong>${a.map(x=>typeof x==='string'?`<p><b>${x}</b></p>`:`<p><b>${x.term||''}</b>${x.definition?`: ${x.definition}`:''}</p>`).join('')}</div>`}
+function renderWorked(d){let w=d?.worked_example||d?.example;if(!w)return '';if(typeof w==='string')return `<div class="ai-section"><strong>Worked example</strong>${renderTextBlock(w)}</div>`;let steps=Array.isArray(w.steps)?`<ol>${w.steps.map(x=>`<li>${typeof x==='string'?x:(x.text||x.detail||'')}</li>`).join('')}</ol>`:'';return `<div class="ai-section"><strong>Worked example</strong>${w.setup?`<p>${w.setup}</p>`:''}${steps}${w.result?`<p><strong>Result:</strong> ${w.result}</p>`:''}${w.why_it_matters?`<p><strong>Why it matters:</strong> ${w.why_it_matters}</p>`:''}</div>`}
+function renderConnection(d){let c=d?.connection;if(!c)return '';if(typeof c==='string')return `<div class="ai-section"><strong>Why this connects</strong>${renderTextBlock(c)}</div>`;return `<div class="ai-section"><strong>Why this connects</strong>${c.shared_mechanism?`<p><strong>Shared mechanism:</strong> ${c.shared_mechanism}</p>`:''}${c.explanation?`<p>${c.explanation}</p>`:''}${c.difference?`<p><strong>Where the analogy breaks:</strong> ${c.difference}</p>`:''}${c.why_useful?`<p><strong>Why the connection helps:</strong> ${c.why_useful}</p>`:''}</div>`}
+function renderSources(d){let a=d?.sources||[];if(!Array.isArray(a)||!a.length)return '';return `<div class="ai-section"><strong>Source / further reading</strong>${a.map(x=>`<p class="fineprint">${x.url?`<a href="${x.url}" target="_blank" rel="noopener">${x.title||x.url}</a>`:(x.title||x)}</p>`).join('')}</div>`}
+function teachingProviderLabel(d){if(d?.provider==='atlas_core')return 'ATLAS CORE LESSON';if(d?.provider==='atlas_oer')return 'OPEN EDUCATIONAL RESOURCE';if(d?.provider==='atlas_fallback')return 'CONTENT UNAVAILABLE';return 'PERSONALIZED LESSON'}
+function renderTeachingBody(d){return `${d.hook?`<div class="notice">${d.hook}</div>`:''}${d.objective?`<p><strong>By the end of this lesson:</strong> ${d.objective}</p>`:''}${renderKeyTerms(d)}<div class="ai-section learn-section"><strong>Learn</strong>${renderTextBlock(d.explanation||d.core_idea||'')}</div>${renderVisual(d)}${renderWorked(d)}${renderConnection(d)}${Array.isArray(d.common_mistakes)&&d.common_mistakes.length?`<div class="ai-section"><strong>Common mistakes</strong><ul>${d.common_mistakes.map(x=>`<li>${x}</li>`).join('')}</ul></div>`:''}${d.takeaway?`<div class="notice"><strong>Takeaway:</strong> ${d.takeaway}</div>`:''}${renderSources(d)}`}
 function renderVisual(d){let steps=d?.visual_steps||d?.diagram_steps||[];if(!Array.isArray(steps)||!steps.length)return '';return `<div class="learning-visual">${steps.slice(0,6).map((s,i)=>`<div class="visual-step"><strong>${i+1}. ${typeof s==='string'?s:(s.title||'Step')}</strong>${typeof s==='object'&&s.detail?`<div>${s.detail}</div>`:''}</div>`).join('')}</div>`}
 async function checkMilestones(){
  let total=sessions.filter(s=>s.completed).reduce((a,s)=>a+(+s.actual_minutes||0),0),verifiedN=masteries.filter(verifiedConcept).length,defs=[[600,'hours_10','10 hours invested'],[1500,'hours_25','25 hours invested'],[3000,'hours_50','50 hours invested'],[6000,'hours_100','100 hours invested'],[12000,'hours_200','200 hours invested']],wanted=defs.filter(([m])=>total>=m).map(x=>[x[1],x[2]]);
@@ -575,7 +605,7 @@ async function checkMilestones(){
  for(let [key,title] of wanted)if(!milestones.some(m=>m.milestone_key===key)){let r=await db.from('user_milestones').insert({user_id:user.id,milestone_key:key,title,metadata:{minutes:total,verified:verifiedN,connections:connections.length}}).select().single();if(!r.error)milestones.push(r.data)}
 }
 async function prefetchLearningObject(){
- let p=todayPlan.find(x=>x.type!=='review'),c=p?.route.c;if(!c)return;let route=p.route.diagnostic?'probe':p.type,d=conceptDifficulty(c),key=`${c.key}:${route}:${d}`;
+ let p=todayPlan.find(x=>x.type!=='review'),c=p?.route.c;if(!c||coreLessonFor(c))return;let route=p.route.diagnostic?'probe':p.type,d=conceptDifficulty(c),key=`${c.key}:${route}:${d}`;
  let cached=learningObjects.some(x=>x.concept_key===c.key&&x.route_type===route&&+x.difficulty===d&&!x.completed_at&&Date.now()-new Date(x.created_at).getTime()<3*864e5);if(cached||prefetchInFlight.has(key))return;
  prefetchInFlight.add(key);
  try{let ctx=learnerContextFor(c,route);ctx.mode=route==='bridge'?'application':route==='probe'?'question':route==='frontier'?'challenge':'lesson';ctx.prefetch=true;ctx.preferred_modality=modalityWinner();let {data,error}=await db.functions.invoke('atlas-ai-content',{body:ctx});if(!error&&data)await saveLearningObject(c,route,data,d)}finally{prefetchInFlight.delete(key)}
@@ -583,6 +613,7 @@ async function prefetchLearningObject(){
 
 async function ai(mode){
  let f=getFrontier(),difficulty=conceptDifficulty(f.concept);$('aiOutput').classList.remove('hidden');$('aiOutput').innerHTML='<div class="skeleton big"></div><div class="skeleton"></div>';
+ let core=mode==='lesson'?coreLessonFor(f.concept):null;if(core){renderAI(core);return}
  let cached=learningObjects.find(x=>x.concept_key===f.concept.key&&x.route_type===mode&&+x.difficulty===difficulty&&Date.now()-new Date(x.created_at).getTime()<3*864e5);
  if(cached?.payload&&Object.keys(cached.payload).length){activeLearningObject=cached;renderAI(cached.payload);return}
  let ctx=learnerContextFor(f.concept,mode);ctx.mode=mode;ctx.minutes=Math.max(6,Math.min(30,Math.round(profile.daily_minutes*.55)));let {data,error}=await db.functions.invoke('atlas-ai-content',{body:ctx});
@@ -590,28 +621,33 @@ async function ai(mode){
  await saveLearningObject(f.concept,mode,data,difficulty);renderAI(data)
 }
 function renderAI(d){
- let opts=(d.quiz?.options||[]).map((x,i)=>`<button class="answer aiQuiz" data-i="${i}" data-correct="${d.quiz.correct_index}">${x}</button>`).join('');
- $('aiOutput').innerHTML=`<div class="eyebrow">${d.provider==='atlas_fallback'?'ADAPTIVE ENGINE':'AI-GENERATED'}${d.modality?' · '+String(d.modality).toUpperCase():''}</div><h3>${d.title||'Learning object'}</h3>${d.hook?`<div class="notice">${d.hook}</div>`:''}<p><strong>Learning objective:</strong> ${d.objective||''}</p><div class="ai-section learn-section"><strong>Learn</strong><p>${d.explanation||''}</p></div>${renderVisual(d)}<div class="ai-section"><strong>Worked example</strong><p>${d.example||''}</p></div>${d.connection?`<div class="ai-section"><strong>Connect it</strong><p>${d.connection}</p></div>`:''}<div class="ai-section"><strong>Apply it</strong><p>${d.challenge||''}</p></div><button id="revealFrontierCheck" class="primary">I’m ready to check my understanding</button><div id="frontierCheck" class="ai-section hidden"><strong>Quick check</strong><p>${d.quiz?.prompt||''}</p>${opts}<button class="answer aiQuiz idk-answer" data-i="-1" data-correct="${d.quiz?.correct_index}">I don’t know yet</button><p id="aiQuizMsg"></p></div>${d.note?`<p class="fineprint">${d.note}</p>`:''}`;
- $('revealFrontierCheck').onclick=()=>{$('frontierCheck').classList.remove('hidden');$('revealFrontierCheck').classList.add('hidden')};
- document.querySelectorAll('.aiQuiz').forEach(b=>b.onclick=()=>{$('aiQuizMsg').textContent=+b.dataset.i<0?'Good call — Atlas records uncertainty instead of rewarding a guess.':+b.dataset.i===+b.dataset.correct?'Correct — next Atlas will look for transfer and retention.':'Not quite. Revisit the mechanism, not just the wording.'})
+ if(d.provider==='atlas_fallback'||d.content_status==='unavailable'){$('aiOutput').innerHTML=`<div class="eyebrow">CONTENT UNAVAILABLE</div><h3>${d.title||'Lesson unavailable'}</h3><div class="notice">Atlas does not have real teaching content for this request right now, so it will not pretend a generic prompt is a lesson or quiz you on material it did not teach.</div><p>${d.note||'The personalized lesson provider is unavailable. Use another Atlas lesson or try again after the teaching provider is restored.'}</p>`;return}
+ let q=d.quiz||null,opts=q?.options?.map((x,i)=>`<button class="answer aiQuiz" data-i="${i}" data-correct="${q.correct_index}">${x}</button>`).join('')||'';
+ $('aiOutput').innerHTML=`<div class="eyebrow">${teachingProviderLabel(d)}${d.modality?' · '+String(d.modality).toUpperCase():''}</div><h3>${d.title||'Lesson'}</h3>${renderTeachingBody(d)}${d.challenge?`<div class="ai-section"><strong>Try it yourself</strong>${renderTextBlock(d.challenge)}</div>`:''}${q?`<button id="revealFrontierCheck" class="primary">Check my understanding</button><div id="frontierCheck" class="ai-section hidden"><strong>Quick check</strong><p>${q.prompt||''}</p>${opts}<button class="answer aiQuiz idk-answer" data-i="-1" data-correct="${q.correct_index}">I don’t know yet</button><p id="aiQuizMsg"></p></div>`:''}${d.note?`<p class="fineprint">${d.note}</p>`:''}`;
+ if(q){$('revealFrontierCheck').onclick=()=>{$('frontierCheck').classList.remove('hidden');$('revealFrontierCheck').classList.add('hidden')};document.querySelectorAll('.aiQuiz').forEach(b=>b.onclick=()=>{let i=+b.dataset.i,msg=i<0?'Good choice. Review the lesson instead of guessing.':i===+b.dataset.correct?`Correct. ${q.rationale||''}`:`Not yet. ${Array.isArray(q.feedback)?(q.feedback[i]||q.rationale||'Re-read the mechanism above.'):(q.rationale||'Re-read the mechanism above.')}`;$('aiQuizMsg').textContent=msg})}
 }
 async function openTask(planIndex){
- let p=todayPlan[planIndex];if(!p)return;activeLearningObject=null;let type=p.type,f={concept:p.route.c,subject:getSubject(p.route.c.subject_key)};
- taskOpenedAt=Date.now();saveDailyProgress();
+ let p=todayPlan[planIndex];if(!p||dailySessionComplete)return;activeLearningObject=null;let type=p.type,f={concept:p.route.c,subject:getSubject(p.route.c.subject_key)};
+ taskOpenedAt=Date.now();saveDailyProgress(false);
  if(type==='review'){
-   $('modalBody').innerHTML=`<div class="eyebrow">RETRIEVAL · ${f.subject?.name||''}</div><h2>${f.concept?.name}</h2><p>Without looking anything up, explain what you remember. Specific mechanisms, examples, and connections are stronger evidence than recognition.</p><textarea id="retrieveText" placeholder="Write from memory…"></textarea><label class="fineprint">How complete did your recall feel?</label><select id="recallQuality"><option value="uncertain">Uncertain — major gaps</option><option value="partial">Partial — main idea, missing detail</option><option value="clear">Clear — mechanism and detail</option></select><button id="taskDone" class="primary">Evaluate retrieval</button>`;
+   if(!atlasTaughtConcept(f.concept.key))return setSystemStatus('Atlas will only use retrieval for concepts it has actually taught you. This block has been replaced on your next plan.','warn');
+   let origin=learningObjects.filter(x=>x.concept_key===f.concept.key&&x.completed_at&&!['review','probe'].includes(x.route_type)&&x.provider!=='atlas_fallback').sort((a,b)=>new Date(b.completed_at)-new Date(a.completed_at))[0];
+   $('modalBody').innerHTML=`<div class="eyebrow">SHORT REVIEW · ${f.subject?.name||''}</div><h2>${f.concept?.name}</h2><div class="notice">This review comes after a prior Atlas lesson. It is not new teaching.</div>${origin?.payload?.takeaway?`<p class="fineprint">Do not open the old lesson yet. First recall the key idea from memory.</p>`:''}<textarea id="retrieveText" placeholder="What do you remember about the mechanism? Give one concrete example if you can."></textarea><label class="fineprint">How complete did your recall feel?</label><select id="recallQuality"><option value="uncertain">Uncertain — major gaps</option><option value="partial">Partial — main idea, missing detail</option><option value="clear">Clear — mechanism and detail</option></select><button id="taskDone" class="primary">Evaluate retrieval</button>`;
    $('taskDone').dataset.provider='openai_evaluator';$('taskDone').dataset.modality='retrieval';$('taskDone').onclick=()=>completeTask(planIndex)
  }else{
-   let isProbe=type==='gap'&&p.route.diagnostic,routeKey=isProbe?'probe':type,mode=type==='bridge'?'application':isProbe?'question':type==='gap'?'lesson':type==='frontier'?'challenge':'lesson',ctx=learnerContextFor(f.concept,routeKey);ctx.mode=mode;ctx.preferred_modality=modalityWinner();
-   let cached=learningObjects.find(x=>x.concept_key===f.concept.key&&x.route_type===routeKey&&+x.difficulty===conceptDifficulty(f.concept)&&!x.completed_at&&Date.now()-new Date(x.created_at).getTime()<3*864e5),data=cached?.payload||null,error=null;
+   let isProbe=type==='gap'&&p.route.diagnostic,routeKey=isProbe?'probe':type,mode=type==='bridge'?'application':isProbe?'question':'lesson',ctx=learnerContextFor(f.concept,routeKey);ctx.mode=mode;ctx.preferred_modality=modalityWinner();
+   let cached=learningObjects.find(x=>x.concept_key===f.concept.key&&x.route_type===routeKey&&+x.difficulty===conceptDifficulty(f.concept)&&!x.completed_at&&Date.now()-new Date(x.created_at).getTime()<3*864e5),core=!isProbe&&type!=='bridge'?coreLessonFor(f.concept):null,data=core||cached?.payload||null,error=null;
    if(cached)activeLearningObject=cached;
+   if(core&&!cached)await saveLearningObject(f.concept,routeKey,core,conceptDifficulty(f.concept));
    if(!data){let response=await db.functions.invoke('atlas-ai-content',{body:ctx});data=response.data;error=response.error;if(!error&&data)await saveLearningObject(f.concept,routeKey,data,conceptDifficulty(f.concept))}
-   if(error||!data){data={provider:'atlas_fallback',title:f.concept?.name,explanation:f.concept?.description||'Use what you already know to reason through this concept.',challenge:'Explain the central mechanism in your own words, then choose the best statement below.',quiz:{prompt:'Which response best reflects a useful learning strategy when evidence is incomplete?',options:['Guess confidently and move on','State what you know, identify uncertainty, and test the missing piece','Avoid the topic entirely'],correct_index:1}}}
-   let q=data.quiz||{};if(!Number.isInteger(q.correct_index)||!Array.isArray(q.options)||q.options.length<2){q={prompt:'Which approach best demonstrates understanding?',options:['Restate a term without explaining it','Explain the mechanism and apply it to a new example','Skip the evidence and rely on confidence'],correct_index:1}};let opts=(q.options||[]).map((x,i)=>`<button class="answer taskQuiz" type="button" data-i="${i}">${x}</button>`).join('')+`<button class="answer taskQuiz idk-answer" type="button" data-i="-1">I don’t know yet</button>`,media=curatedMediaFor(f.concept.key);
-   $('modalBody').innerHTML=isProbe?`<div class="eyebrow">MAP PROBE · ${f.subject?.name||''}</div><h2>${f.concept?.name}</h2><div class="notice">This is a placement probe, not a grade. Atlas is checking whether it should move faster, slower, or stay here.</div><div class="ai-section"><strong>Diagnostic check</strong><p>${q.prompt||'Choose the best answer.'}</p>${opts}<p id="taskQuizMsg" class="fineprint">Your answer calibrates the map. It will not erase prior progress.</p></div><button id="taskDone" class="primary" disabled>Record probe</button>`:`<div class="eyebrow">${type.toUpperCase()} · ${f.subject?.name||''}${data.modality?' · '+String(data.modality).toUpperCase():''}</div><h2>${data.title||f.concept?.name}</h2>${data.hook?`<div class="notice">${data.hook}</div>`:''}<p>${data.explanation||''}</p>${renderVisual(data)}${data.connection?`<div class="frontier-card"><strong>Why this connects</strong><p>${data.connection}</p></div>`:''}<div class="frontier-card"><strong>${type==='bridge'?'Cross-domain application':type==='gap'?'Foundation check':'Stretch challenge'}</strong><p>${type==='bridge'?(data.example||data.challenge||'Connect this concept to a system you already understand.'):(data.challenge||data.example||'Apply the idea.')}</p></div>${data.media_hint?`<p class="fineprint">Visual/video support: ${data.media_hint}</p>`:''}${media.length?`<div class="ai-section"><strong>Curated media</strong>${media.map(m=>`<p><a href="${m.url}" target="_blank" rel="noopener">${m.title} · ${m.provider}</a></p>`).join('')}</div>`:''}${type==='bridge'?'<textarea id="applyText" placeholder="Explain the connection or application in your own words…"></textarea>':''}<button id="revealTaskCheck" class="primary">Continue to understanding check</button><div id="taskCheck" class="ai-section hidden"><strong>Check your understanding</strong><p>${q.prompt||'Which choice best matches the mechanism?'}</p>${opts}<p id="taskQuizMsg" class="fineprint">“I don’t know” is useful data. Don’t guess just to move on.</p></div><button id="taskDone" class="primary hidden" disabled>Record evidence</button>`;
+   if(error||!data||data.provider==='atlas_fallback'||data.content_status==='unavailable'){
+     $('modalBody').innerHTML=`<div class="eyebrow">LESSON NOT AVAILABLE</div><h2>${f.concept?.name}</h2><div class="notice">Atlas could not load real instructional content for this concept. It will not replace teaching with a generic quiz.</div><p>${data?.note||'Try another lesson while the content provider is restored.'}</p><button id="taskCancelUnavailable" class="primary">Return to Today</button>`;$('taskCancelUnavailable').onclick=()=>$('modal').classList.add('hidden');$('modal').classList.remove('hidden');return
+   }
+   let q=data.quiz||null,hasCheck=!!(q&&Number.isInteger(q.correct_index)&&Array.isArray(q.options)&&q.options.length>=2),opts=hasCheck?q.options.map((x,i)=>`<button class="answer taskQuiz" type="button" data-i="${i}">${x}</button>`).join('')+`<button class="answer taskQuiz idk-answer" type="button" data-i="-1">I don’t know yet</button>`:'',media=curatedMediaFor(f.concept.key);
+   $('modalBody').innerHTML=isProbe?`<div class="eyebrow">QUICK CALIBRATION · ${f.subject?.name||''}</div><h2>${f.concept?.name}</h2><div class="notice">This is the one exception: a short map calibration, not a lesson. Atlas keeps these separate from teaching.</div><div class="ai-section"><strong>Diagnostic check</strong><p>${q?.prompt||'Choose the best answer.'}</p>${opts}</div><button id="taskDone" class="primary" disabled>Record calibration</button>`:`<div class="eyebrow">${teachingProviderLabel(data)} · ${f.subject?.name||''}</div><h2>${data.title||f.concept?.name}</h2>${renderTeachingBody(data)}${data.challenge?`<div class="ai-section"><strong>Guided practice</strong>${renderTextBlock(data.challenge)}${data.hint?`<p class="fineprint"><strong>Hint:</strong> ${data.hint}</p>`:''}</div>`:''}${media.length?`<div class="ai-section"><strong>Curated media</strong>${media.map(m=>`<p><a href="${m.url}" target="_blank" rel="noopener">${m.title} · ${m.provider}</a></p>`).join('')}</div>`:''}${type==='bridge'&&data.connection?'<textarea id="applyText" placeholder="In your own words, explain the shared mechanism and where the connection breaks…"></textarea>':''}${hasCheck?`<button id="revealTaskCheck" class="primary">I learned this — check my understanding</button><div id="taskCheck" class="ai-section hidden"><strong>Quick check</strong><p>${q.prompt}</p>${opts}<p id="taskQuizMsg" class="fineprint">Use “I don’t know yet” instead of guessing.</p></div><button id="taskDone" class="primary hidden" disabled>Finish lesson</button>`:`<div class="notice">This source provides real teaching material but no validated quiz. Atlas will record this as exposure only, not verified mastery.</div><button id="taskDone" class="primary">Finish lesson</button>`}`;
    if($('revealTaskCheck'))$('revealTaskCheck').onclick=()=>{$('taskCheck').classList.remove('hidden');$('revealTaskCheck').classList.add('hidden');$('taskDone').classList.remove('hidden')};
-   $('taskDone').dataset.provider=data.provider||'unknown';$('taskDone').dataset.modality=data.modality||type;$('taskDone').dataset.objectId=activeLearningObject?.id||'';
-   document.querySelectorAll('.taskQuiz').forEach(b=>b.onclick=()=>{let selected=+b.dataset.i;document.querySelectorAll('.taskQuiz').forEach(x=>x.classList.toggle('selected',x===b));$('taskDone').disabled=false;$('taskDone').dataset.selected=selected;$('taskDone').dataset.correct=q.correct_index??-999;if(selected!==q.correct_index&&Array.isArray(q.misconceptions)){$('taskDone').dataset.misconception=q.misconceptions[selected]||''}});
+   $('taskDone').dataset.provider=data.provider||'unknown';$('taskDone').dataset.modality=data.modality||type;$('taskDone').dataset.objectId=activeLearningObject?.id||'';$('taskDone').dataset.noCheck=hasCheck?'0':'1';$('taskDone').dataset.bridgeHasConnection=data.connection?'1':'0';
+   document.querySelectorAll('.taskQuiz').forEach(b=>b.onclick=()=>{let selected=+b.dataset.i;document.querySelectorAll('.taskQuiz').forEach(x=>x.classList.toggle('selected',x===b));$('taskDone').disabled=false;$('taskDone').dataset.selected=selected;$('taskDone').dataset.correct=q.correct_index??-999;let msg=selected<0?'Good choice. Review the lesson instead of guessing.':selected===q.correct_index?`Correct. ${q.rationale||''}`:`Not yet. ${Array.isArray(q.feedback)?(q.feedback[selected]||q.rationale||'Re-read the explanation above.'):(q.rationale||'Re-read the explanation above.')}`;if($('taskQuizMsg'))$('taskQuizMsg').textContent=msg;if(selected!==q.correct_index&&Array.isArray(q.misconceptions))$('taskDone').dataset.misconception=q.misconceptions[selected]||''});
    $('taskDone').onclick=()=>completeTask(planIndex)
  }
  $('modal').classList.remove('hidden')
@@ -629,12 +665,12 @@ async function completeTask(planIndex){
    score=Math.max(0,Math.min(100,Number(ev?.score)||30));
    if(evalError)score=Math.min(score,40);
  }else{
-   let b=$('taskDone'),provider=b?.dataset.provider||'unknown',sel=+(b?.dataset.selected??-999),correct=+(b?.dataset.correct??-998);
-   if(!Number.isInteger(sel)){if(doneBtn){doneBtn.disabled=false;doneBtn.textContent='Record evidence'}return alert('Complete the quick check first.');}
-   let bridgeText=type==='bridge'?(($('applyText')?.value||'').trim()):'';
-   if(type==='bridge'&&bridgeText.length<30){if(doneBtn){doneBtn.disabled=false;doneBtn.textContent='Record evidence'}return alert('Explain the bridge in your own words before recording it.');}
-   score=sel<0?20:sel===correct?(type==='frontier'?90:type==='bridge'?78:84):38;
-   if(type==='bridge'){
+   let b=$('taskDone'),provider=b?.dataset.provider||'unknown',noCheck=b?.dataset.noCheck==='1',sel=+(b?.dataset.selected??-999),correct=+(b?.dataset.correct??-998);
+   if(!noCheck&&!Number.isInteger(sel)){if(doneBtn){doneBtn.disabled=false;doneBtn.textContent='Finish lesson'}return alert('Complete the quick check first.');}
+   let bridgeHasConnection=b?.dataset.bridgeHasConnection==='1',bridgeText=type==='bridge'&&bridgeHasConnection?(($('applyText')?.value||'').trim()):'';
+   if(type==='bridge'&&bridgeHasConnection&&bridgeText.length<30){if(doneBtn){doneBtn.disabled=false;doneBtn.textContent='Finish lesson'}return alert('Explain the connection in your own words before finishing the lesson.');}
+   score=noCheck?55:(sel<0?20:sel===correct?(type==='frontier'?90:type==='bridge'?78:84):38);
+   if(type==='bridge'&&bridgeHasConnection){
      $('taskDone').disabled=true;$('taskDone').textContent='Evaluating connection…';
      let ctx=learnerContextFor(concept,'bridge');ctx.mode='evaluate';ctx.response_text=bridgeText;ctx.self_rating='not supplied';
      let {data:ev}=await db.functions.invoke('atlas-ai-content',{body:ctx});evalMeta=ev||null;let written=Math.max(0,Math.min(100,Number(ev?.score)||35));
@@ -644,25 +680,26 @@ async function completeTask(planIndex){
  }
  let elapsed=Math.max(20,Math.round((Date.now()-taskOpenedAt)/1000)),perTaskCap=Math.max(120,Math.round((profile.daily_minutes*60/Math.max(1,todayPlan.length))*1.5));
  elapsed=Math.min(elapsed,perTaskCap);
- let provider=$('taskDone')?.dataset.provider||'unknown',probeFallback=!!(p.route.diagnostic&&provider==='atlas_fallback');
+ let provider=$('taskDone')?.dataset.provider||'unknown',probeFallback=!!(p.route.diagnostic&&provider==='atlas_fallback'),instructionOnly=$('taskDone')?.dataset.noCheck==='1';
  let modality=$('taskDone')?.dataset.modality||type,objectId=$('taskDone')?.dataset.objectId||null,bridgeFrom=bridgeSource(concept),saveResult={ok:true};
  if(probeFallback){let pr=await db.from('learning_events').insert({user_id:user.id,concept_key:concept.key,event_type:'probe_unverified',score:null,difficulty,duration_seconds:elapsed,modality:'probe',route_type:'probe',provider,learning_object_id:objectId||null,bridge_source:bridgeFrom});saveResult={ok:!pr.error,message:pr.error?.message}}
- else saveResult=await recordEvidence(concept,type,score,difficulty,elapsed,{provider,modality,learning_object_id:objectId,bridge_source:bridgeFrom});
+ else saveResult=await recordEvidence(concept,type,score,difficulty,elapsed,{provider,modality,learning_object_id:objectId,bridge_source:bridgeFrom,instruction_only:$('taskDone')?.dataset.noCheck==='1'});
  if(!saveResult.ok){if(doneBtn){doneBtn.disabled=false;doneBtn.textContent='Retry saving'}let msg=$('taskQuizMsg')||$('reviewEval');if(msg)msg.textContent='Atlas could not save this evidence yet. Your work is still on screen—please retry.';setSystemStatus('Learning evidence did not sync. Atlas did not count this block as complete.','error');return}
  sessionActiveSeconds+=elapsed;todayDone.add(key);saveDailyProgress();setSystemStatus(coreLoadWarning,coreLoadWarning?'warn':'');
  let outcomeModality=modality;
  if(type==='review'){let origin=learningObjects.filter(x=>x.concept_key===concept.key&&x.completed_at&&x.route_type!=='review').sort((a,b)=>new Date(b.completed_at)-new Date(a.completed_at))[0];outcomeModality=origin?.modality||modality}
  let enrichment=[];
- enrichment.push(updateModality(outcomeModality,score,type==='bridge'?score:0,type==='review'?score:0));
+ enrichment.push(updateModality(outcomeModality,score,(type==='bridge'&&!instructionOnly)?score:0,type==='review'?score:0));
  if(evalMeta?.misconception)enrichment.push(recordMisconception(concept.key,String(evalMeta.misconception_code||'model_misconception'),String(evalMeta.misconception),Math.max(.2,Math.min(1,(100-score)/100))));
- if(type==='bridge'&&bridgeFrom){let from=concepts.filter(c=>c.subject_key===bridgeFrom).sort((a,b)=>(+b.level)-(+a.level))[0];if(from)enrichment.push(formConnection(from.key,concept.key,score))}
+ if(type==='bridge'&&bridgeFrom&&!instructionOnly){let from=concepts.filter(c=>c.subject_key===bridgeFrom).sort((a,b)=>(+b.level)-(+a.level))[0];if(from)enrichment.push(formConnection(from.key,concept.key,score))}
  if(objectId)enrichment.push(db.from('learning_objects').update({completed_at:new Date().toISOString(),quality_score:score}).eq('id',objectId));
  Promise.allSettled(enrichment).then(()=>{});
  $('modal').classList.add('hidden');renderToday();
  if(todayDone.size===todayPlan.length){
    let actual=Math.max(1,Math.min(profile.daily_minutes,Math.round(sessionActiveSeconds/60)));
-   let r=await db.from('study_sessions').insert({user_id:user.id,planned_minutes:profile.daily_minutes,actual_minutes:actual,session_type:'adaptive_v06',completed:true,completed_at:new Date().toISOString()});
-   if(!r.error){await updateStreak();todayDone.clear();sessionActiveSeconds=0;await loadCore();todayPlan=chooseSessionPlan();renderAll();celebrate(actual)} 
+   let r=await db.from('study_sessions').insert({user_id:user.id,planned_minutes:profile.daily_minutes,actual_minutes:actual,session_type:'adaptive_v065_learning',completed:true,completed_at:new Date().toISOString()});
+   if(!r.error){dailySessionComplete=true;await saveDailyProgress(true);await updateStreak();await loadCore();renderAll();celebrate(actual)}
+   else setSystemStatus('Your lesson evidence was saved, but the session summary did not sync yet. Atlas will retry next time.','warn')
  }
 }
 
@@ -703,11 +740,11 @@ $('saveDiscoveryCuriosity').onclick=async()=>{
 };
 
 async function recordEvidence(concept,type,score,difficulty,durationSeconds=0,meta={}){
- if(!concept?.key)return {ok:false,message:'Missing concept.'};let source=['bridge','real_world','teach_back'].includes(type)?'assignment':type==='review'?'review':type==='frontier'?'quiz':type==='gap'?'quiz':'lesson',evidenceId=meta.evidence_id||`v06_${type}_${concept.key}_${Date.now()}`;
+ if(!concept?.key)return {ok:false,message:'Missing concept.'};let source=meta.instruction_only?'lesson':['bridge','real_world','teach_back'].includes(type)?'assignment':type==='review'?'review':type==='frontier'?'quiz':type==='gap'?'quiz':'lesson',evidenceId=meta.evidence_id||`v06_${type}_${concept.key}_${Date.now()}`;
  await db.ensureSession();let token=db.token();if(!token)return {ok:false,message:'Your session expired. Please log in again.'};
  let r=await fetch(`${URL}/rest/v1/rpc/record_learning_evidence`,{method:'POST',headers:{apikey:KEY,Authorization:'Bearer '+token,'Content-Type':'application/json'},body:JSON.stringify({p_concept:concept.key,p_type:source,p_score:score,p_difficulty:difficulty,p_source:evidenceId})});
  if(!r.ok){let msg=await r.text().catch(()=>`HTTP ${r.status}`);return {ok:false,message:msg||`Mastery save failed (${r.status})`}}
- db.from('learning_events').insert({user_id:user.id,concept_key:concept.key,event_type:source,score,difficulty,duration_seconds:durationSeconds,modality:meta.modality||type,route_type:type,provider:meta.provider||'unknown',learning_object_id:meta.learning_object_id||null,bridge_source:meta.bridge_source||null,response_ms:durationSeconds*1000,correct:score>=70,metadata:{version:ATLAS_VERSION,evidence_id:evidenceId}}).then(x=>{if(x.error){coreLoadWarning='Learning was saved, but activity history did not sync yet.';setSystemStatus(coreLoadWarning,'warn')}});
+ db.from('learning_events').insert({user_id:user.id,concept_key:concept.key,event_type:source,score,difficulty,duration_seconds:durationSeconds,modality:meta.modality||type,route_type:type,provider:meta.provider||'unknown',learning_object_id:meta.learning_object_id||null,bridge_source:meta.bridge_source||null,response_ms:durationSeconds*1000,correct:score>=70,metadata:{version:ATLAS_VERSION,evidence_id:evidenceId,instruction_only:!!meta.instruction_only}}).then(x=>{if(x.error){coreLoadWarning='Learning was saved, but activity history did not sync yet.';setSystemStatus(coreLoadWarning,'warn')}});
  if(['bridge','real_world','teach_back'].includes(type)&&score>=40){let m=conceptMastery(concept.key),old=+m?.transfer_score||0,next=Math.round((old*.7+score*.3)*10)/10;db.from('concept_mastery').update({transfer_score:next,updated_at:new Date().toISOString()}).eq('user_id',user.id).eq('concept_key',concept.key)}
  if(score>=82)for(let mis of misconceptions.filter(x=>x.concept_key===concept.key&&!x.resolved_at))db.from('learner_misconceptions').update({resolved_at:new Date().toISOString()}).eq('id',mis.id);
  return {ok:true,evidenceId}
@@ -733,7 +770,8 @@ $('askAtlasButton').onclick=async()=>{
  let q=$('askAtlasText').value.trim();if(q.length<5)return;let el=$('exploreOutput');el.classList.remove('hidden');el.innerHTML='<div class="skeleton big"></div><div class="skeleton"></div>';
  let match=knowledgeSearch(q)[0]?.c||pickCandidate('frontier')?.c,ctx=learnerContextFor(match,'ask');ctx.mode=/(\b(today|current|latest|now|recent|this week|this month|2026)\b|\b(price|rate|president|prime minister|ceo|election|war|conflict|stock|market|weather|schedule|score|standings|law in effect|who currently)\b)/i.test(q)?'current_world':'ask';ctx.question=q;ctx.prerequisite_path=prerequisitePath(match).map(x=>x.name);
  let {data,error}=await db.functions.invoke('atlas-ai-content',{body:ctx});if(error||!data){el.innerHTML='<p>Atlas could not answer that right now.</p>';return}
- await saveLearningObject(match,ctx.mode,data,conceptDifficulty(match));el.innerHTML=`<div class="eyebrow">${ctx.mode==='current_world'?'FOUNDATION + CURRENT WORLD':'ASK ATLAS'}</div><h3>${data.title||q}</h3><p>${data.explanation||data.answer||''}</p>${renderVisual(data)}${data.connection?`<div class="frontier-card"><strong>Why this connects</strong><p>${data.connection}</p></div>`:''}<div class="ai-section"><strong>Prerequisite path</strong><p>${ctx.prerequisite_path.length?ctx.prerequisite_path.join(' → '):'No blocking prerequisite is evident from your current map.'}</p></div>${Array.isArray(data.sources)&&data.sources.length?`<div class="ai-section"><strong>Current sources</strong>${data.sources.map(s=>`<p class="fineprint">${s.title||s.url||s}</p>`).join('')}</div>`:''}`
+ if(data.provider==='atlas_fallback'||data.content_status==='unavailable'){el.innerHTML=`<div class="eyebrow">ANSWER UNAVAILABLE</div><h3>${data.title||q}</h3><div class="notice">${data.note||'Atlas does not have grounded content for this answer right now.'}</div>`;return}
+ await saveLearningObject(match,ctx.mode,data,conceptDifficulty(match));el.innerHTML=`<div class="eyebrow">${ctx.mode==='current_world'?'FOUNDATION + CURRENT WORLD':'ASK ATLAS'}</div><h3>${data.title||q}</h3>${renderTeachingBody(data)}<div class="ai-section"><strong>Prerequisite path</strong><p>${ctx.prerequisite_path.length?ctx.prerequisite_path.join(' → '):'No blocking prerequisite is evident from your current map.'}</p></div>`
 };
 $('teachAtlasButton').onclick=async()=>{
  let name=$('teachConcept').value.trim(),text=$('teachText').value.trim();if(name.length<2||text.length<40)return alert('Choose a concept and explain it in enough detail for Atlas to evaluate.');
@@ -746,7 +784,7 @@ $('teachAtlasButton').onclick=async()=>{
 };
 $('realWorldButton').onclick=async()=>{
  let route=pickCandidate('bridge')||pickCandidate('frontier'),c=route?.c;if(!c)return;let el=$('exploreOutput');el.classList.remove('hidden');el.innerHTML='<div class="skeleton big"></div>';
- let ctx=learnerContextFor(c,'real_world');ctx.mode='real_world';let {data,error}=await db.functions.invoke('atlas-ai-content',{body:ctx});if(error||!data){el.innerHTML='<p>Challenge unavailable right now.</p>';return}
+ let ctx=learnerContextFor(c,'real_world');ctx.mode='real_world';let {data,error}=await db.functions.invoke('atlas-ai-content',{body:ctx});if(error||!data||data.provider==='atlas_fallback'||data.content_status==='unavailable'){el.innerHTML=`<p>${data?.note||'Challenge unavailable right now.'}</p>`;return}
  await saveLearningObject(c,'real_world',data,conceptDifficulty(c));el.innerHTML=`<div class="eyebrow">REAL-WORLD TRANSFER</div><h3>${data.title||'Solve the situation'}</h3><p>${data.challenge||data.explanation||''}</p>${renderVisual(data)}<textarea id="realWorldResponse" placeholder="What knowledge applies, and how would you reason through it?"></textarea><button id="submitRealWorld" class="primary">Evaluate my reasoning</button>`;
  $('submitRealWorld').onclick=async()=>{let text=$('realWorldResponse').value.trim();if(text.length<40)return;let ec=learnerContextFor(c,'real_world');ec.mode='evaluate';ec.response_text=text;let {data:ev}=await db.functions.invoke('atlas-ai-content',{body:ec});let score=Math.max(0,Math.min(100,+ev?.score||30));el.innerHTML+=`<div class="notice"><strong>${score.toFixed(0)}/100 transfer evidence.</strong> ${ev?.feedback||''}</div>`;if(ev?.provider!=='atlas_fallback')await recordEvidence(c,'real_world',score,conceptDifficulty(c),Math.max(30,Math.round(text.length/5)),{provider:ev?.provider,modality:'real_world'});await updateModality('real_world',score,score,0);if(ev?.misconception)await recordMisconception(c.key,String(ev.misconception_code||'transfer'),String(ev.misconception),(100-score)/100)}
 };
@@ -766,10 +804,10 @@ function openPage(page){
 function renderAccount(){
  if(!$('accountName')||!profile)return;$('accountName').textContent=profile.display_name||user?.user_metadata?.display_name||'Atlas learner';$('accountEmail').textContent=user?.email||'—';$('accountBuild').textContent=ATLAS_VERSION;$('accountMinutes').value=String(profile.daily_minutes||30);$('accountDays').value=String(profile.days_per_week||5)
 }
-$('saveAccountSchedule').onclick=async()=>{let daily=+$('accountMinutes').value,days=+$('accountDays').value,r=await db.from('profiles').update({daily_minutes:daily,days_per_week:days,weekly_goal_minutes:daily*days,updated_at:new Date().toISOString()}).eq('user_id',user.id);if(r.error){$('accountMessage').textContent=r.error.message;return}profile.daily_minutes=daily;profile.days_per_week=days;profile.weekly_goal_minutes=daily*days;$('dailyMinutes').textContent=daily;if(todayDone.size===0){todayPlan=[];renderAll();$('accountMessage').textContent='Learning schedule saved. Today’s plan has been resized to fit it.'}else $('accountMessage').textContent='Learning schedule saved. Your current in-progress session stays intact; the new timing applies to the next session.'};
+$('saveAccountSchedule').onclick=async()=>{let daily=+$('accountMinutes').value,days=+$('accountDays').value,r=await db.from('profiles').update({daily_minutes:daily,days_per_week:days,weekly_goal_minutes:daily*days,updated_at:new Date().toISOString()}).eq('user_id',user.id);if(r.error){$('accountMessage').textContent=r.error.message;return}profile.daily_minutes=daily;profile.days_per_week=days;profile.weekly_goal_minutes=daily*days;$('dailyMinutes').textContent=daily;if(todayDone.size===0&&!dailySessionComplete){todayPlan=[];renderAll();$('accountMessage').textContent='Learning schedule saved. Today’s plan has been resized to fit it.'}else $('accountMessage').textContent='Learning schedule saved. Your current in-progress session stays intact; the new timing applies to the next session.'};
 $('sendRecovery').onclick=async()=>{$('accountMessage').textContent='Sending recovery link…';let r=await db.auth.resetPasswordForEmail(user.email,{redirectTo:location.origin+location.pathname});$('accountMessage').textContent=r.error?r.error.message:'Recovery link sent to '+user.email+'.'};
 $('changePassword').onclick=async()=>{let a=$('newPassword').value,b=$('confirmPassword').value;if(a.length<8){$('accountMessage').textContent='Use at least 8 characters.';return}if(a!==b){$('accountMessage').textContent='Passwords do not match.';return}$('accountMessage').textContent='Updating password…';let r=await db.auth.updateUser({password:a});$('accountMessage').textContent=r.error?r.error.message:'Password updated.';if(!r.error){$('newPassword').value='';$('confirmPassword').value='';localStorage.removeItem('atlas_recovery_pending')}};
 
 async function boot(){let u=(await db.auth.getUser()).data.user;if(!u){$('logout').classList.add('hidden');show('auth');return}user=u;$('logout').classList.remove('hidden');let r=await db.from('profiles').select('*').eq('user_id',u.id).single();if(r.error){$('authMessage').textContent='Profile load failed: '+r.error.message;show('auth');return}profile=r.data;if(!profile.onboarding_complete){$('minutes').value=profile.daily_minutes;$('days').value=profile.days_per_week;show('onboarding');return}if(!['v0.4','v0.5','v0.6'].includes(profile.placement_version)){assessmentLanding();return}loadApp()}
 mode('signup');boot();
-window.addEventListener('pagehide',()=>{try{if(user&&attempt){let phase=!$('checkpoint').classList.contains('hidden')?'checkpoint':round>3?'open':'questions';localStorage.setItem(progressLocalKey('assessment'),JSON.stringify({attempt,round,qIndex,openIndex,draft:$('openText')?.value||'',phase,saved_at:new Date().toISOString()}))}if(user){let existing=progressCache[dailyProgressKey()]||{};localStorage.setItem(progressLocalKey(dailyProgressKey()),JSON.stringify({...existing,completed:existing.completed||false,todayDone:[...todayDone],sessionActiveSeconds,plan:todayPlan.map(p=>({type:p.type,concept_key:p.route.c.key,diagnostic:!!p.route.diagnostic})),saved_at:new Date().toISOString()}))}}catch{}});
+window.addEventListener('pagehide',()=>{try{if(user&&attempt){let phase=!$('checkpoint').classList.contains('hidden')?'checkpoint':round>3?'open':'questions';localStorage.setItem(progressLocalKey('assessment'),JSON.stringify({attempt,round,qIndex,openIndex,draft:$('openText')?.value||'',phase,saved_at:new Date().toISOString()}))}if(user){let existing=progressCache[dailyProgressKey()]||{};localStorage.setItem(progressLocalKey(dailyProgressKey()),JSON.stringify({...existing,completed:dailySessionComplete||existing.completed||false,todayDone:[...todayDone],sessionActiveSeconds,plan:todayPlan.map(p=>({type:p.type,concept_key:p.route.c.key,diagnostic:!!p.route.diagnostic})),saved_at:new Date().toISOString()}))}}catch{}});
