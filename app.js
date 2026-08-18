@@ -2,14 +2,14 @@ const URL='https://fhjutbhyvaamzzsipwaa.supabase.co';
 const KEY='sb_publishable_Ytbw_MTkDIhZP1KerZ4bAw_P7XPwFH_';
 const db=window.createAtlasClient(URL,KEY);
 const CORE_LESSONS=window.ATLAS_CORE_LESSONS||{};
-const ATLAS_VERSION='v0.6.5',ATLAS_BUILD='2026.08.18';
+const ATLAS_VERSION='v0.6.6',ATLAS_BUILD='2026.08.18';
 window.addEventListener('error',e=>{
   const msg='Atlas hit an unexpected screen error. Your saved progress is not erased.';
   const status=document.getElementById('systemStatus'),auth=document.getElementById('authMessage');
   if(status&&!status.classList.contains('hidden')||document.getElementById('app')&&!document.getElementById('app').classList.contains('hidden')){if(status){status.textContent=msg;status.classList.remove('hidden');status.classList.add('status-error')}}else if(auth)auth.textContent=msg;
 });
 const $=id=>document.getElementById(id);
-let authMode='signup',user=null,profile=null,subjects=[],concepts=[],states=[],sessions=[],masteries=[],interests=[],prereqs=[],events=[],attempt=null,round=1,qIndex=0,answers=[],roundQs=[],openIndex=0,todayDone=new Set(),frontierConcept=null,currentRoute=null,todayPlan=[],dailySessionComplete=false,taskOpenedAt=0,sessionActiveSeconds=0,activityBySubject={},activityByConcept={},misconceptions=[],modalityPerf=[],curiosityQueue=[],learningObjects=[],connections=[],milestones=[],curatedMedia=[],activeLearningObject=null,assessmentBusy=false,progressCache={},activeDiscovery=null,discoverySeen=new Set(),prefetchInFlight=new Set(),coreLoadWarning='';
+let authMode='signup',user=null,profile=null,subjects=[],concepts=[],states=[],sessions=[],masteries=[],interests=[],prereqs=[],events=[],attempt=null,round=1,qIndex=0,answers=[],roundQs=[],openIndex=0,todayDone=new Set(),frontierConcept=null,currentRoute=null,todayPlan=[],dailySessionComplete=false,guidedSessionActive=false,taskOpenedAt=0,sessionActiveSeconds=0,activityBySubject={},activityByConcept={},misconceptions=[],modalityPerf=[],curiosityQueue=[],learningObjects=[],connections=[],milestones=[],curatedMedia=[],activeLearningObject=null,assessmentBusy=false,progressCache={},activeDiscovery=null,discoverySeen=new Set(),prefetchInFlight=new Set(),coreLoadWarning='';
 const VIEWS=['auth','onboarding','assessmentIntro','assessment','checkpoint','app'];
 const EXTRA=['Science','Health & Medicine','Trades & Construction','Business & Leadership','Accounting & Economics','Technology & AI','History & Geopolitics','Psychology & Philosophy','Arts & Culture'];
 
@@ -95,7 +95,7 @@ const INTEREST_KEYS={
 'Arts & Culture':['art_music','literature','culture_society','religion_culture','media']
 };
 function interestKeys(){let set=new Set();interests.forEach(i=>(INTEREST_KEYS[i.subject_key]||[i.subject_key]).forEach(k=>set.add(k)));return set}
-$('onboardingForm').onsubmit=async e=>{e.preventDefault();let chosen=[...document.querySelectorAll('.chip.active')].map(x=>x.dataset.v),keys=[...new Set(chosen.flatMap(s=>INTEREST_KEYS[s]||[]))];let daily=+$('minutes').value,days=+$('days').value;let r=await db.from('profiles').update({daily_minutes:daily,days_per_week:days,weekly_goal_minutes:daily*days,onboarding_complete:true,updated_at:new Date().toISOString()}).eq('user_id',user.id);if(r.error)return alert(r.error.message);if(keys.length)await db.from('user_interests').upsert(keys.map(s=>({user_id:user.id,subject_key:s,depth_preference:'deep'})),{onConflict:'user_id,subject_key'});profile={...profile,daily_minutes:daily,days_per_week:days,weekly_goal_minutes:daily*days,onboarding_complete:true};assessmentLanding()};
+$('onboardingForm').onsubmit=async e=>{e.preventDefault();let chosen=[...document.querySelectorAll('.chip.active')].map(x=>x.dataset.v),keys=[...new Set(chosen.flatMap(s=>INTEREST_KEYS[s]||[]))];let daily=+$('minutes').value,days=+$('days').value,goal=($('onboardingGoal')?.value||'').trim();let r=await db.from('profiles').update({daily_minutes:daily,days_per_week:days,weekly_goal_minutes:daily*days,learning_goal:goal||null,onboarding_complete:true,updated_at:new Date().toISOString()}).eq('user_id',user.id);if(r.error)return alert(r.error.message);if(keys.length)await db.from('user_interests').upsert(keys.map(s=>({user_id:user.id,subject_key:s,depth_preference:'deep'})),{onConflict:'user_id,subject_key'});profile={...profile,daily_minutes:daily,days_per_week:days,weekly_goal_minutes:daily*days,learning_goal:goal||null,onboarding_complete:true};assessmentLanding()};
 
 
 function progressLocalKey(key){return `atlas_progress_${user?.id||'anon'}_${key}`}
@@ -111,15 +111,14 @@ async function getProgressState(key){
  if(user){let r=await db.from('user_progress').select('*').eq('user_id',user.id).eq('progress_key',key).single();if(!r.error&&r.data?.state){progressCache[key]=r.data.state;return r.data.state}}
  progressCache[key]=local||null;return progressCache[key]
 }
-function localDayKey(){let d=new Date(),y=d.getFullYear(),m=String(d.getMonth()+1).padStart(2,'0'),day=String(d.getDate()).padStart(2,'0');return `${y}-${m}-${day}`}
-function dailyProgressKey(){return `daily_learning_v065_${localDayKey()}`}
+function dailyProgressKey(){return `daily_learning_v066_${localDayKey()}`}
 async function saveDailyProgress(completed=dailySessionComplete){
  if(!user)return;
- await saveProgressState(dailyProgressKey(),{completed:!!completed,todayDone:[...todayDone],sessionActiveSeconds,plan:todayPlan.map(p=>({type:p.type,concept_key:p.route.c.key,diagnostic:!!p.route.diagnostic}))})
+ await saveProgressState(dailyProgressKey(),{completed:!!completed,guidedSessionActive:!!guidedSessionActive,todayDone:[...todayDone],sessionActiveSeconds,plan:todayPlan.map(p=>({type:p.type,concept_key:p.route.c.key,diagnostic:!!p.route.diagnostic}))})
 }
 async function restoreDailyProgress(){
  let s=await getProgressState(dailyProgressKey());if(!s)return;
- dailySessionComplete=!!s.completed;todayDone=new Set(s.todayDone||[]);sessionActiveSeconds=+s.sessionActiveSeconds||0;
+ dailySessionComplete=!!s.completed;guidedSessionActive=!!s.guidedSessionActive;todayDone=new Set(s.todayDone||[]);sessionActiveSeconds=+s.sessionActiveSeconds||0;
  if(Array.isArray(s.plan)&&s.plan.length){
   let restored=s.plan.map(x=>{let c=conceptByKey(x.concept_key);if(!c)return null;let mode=x.type==='gap'?'gap':x.type==='bridge'?'bridge':x.type==='review'?'review':'frontier',route=routeScore(c,mode);route.diagnostic=!!x.diagnostic;return {type:x.type,route}}).filter(Boolean);
   if(restored.length===s.plan.length)todayPlan=restored
@@ -290,6 +289,10 @@ function bridgeSource(c){
  let reciprocal=concepts.find(x=>x.subject_key!==c.subject_key&&(x.bridge_tags||[]).includes(c.subject_key)&&subjectEvidence(x.subject_key).confidence>=35&&subjectEvidence(x.subject_key).ability>=60);
  return reciprocal?.subject_key||null
 }
+
+function goalTokens(){return String(profile?.learning_goal||'').toLowerCase().replace(/[^a-z0-9]+/g,' ').split(/\s+/).filter(w=>w.length>=4&&!['want','learn','better','understand','become','knowledge','broadly','about','more'].includes(w))}
+function goalBoost(c){let toks=goalTokens();if(!toks.length)return 0;let hay=`${getSubject(c.subject_key)?.name||''} ${c.name||''} ${c.description||''} ${c.learning_objective||''}`.toLowerCase(),hits=toks.filter(t=>hay.includes(t)).length;return Math.min(34,hits*12)}
+
 function routeScore(c,mode='general'){
  let e=subjectEvidence(c.subject_key),m=conceptMastery(c.key),score=0,reasons=[],level=+c.level||1,lowConfidence=!e.known||e.confidence<35;
  let diagnostic=mode==='gap'&&lowConfidence&&level===diagnosticTarget(c.subject_key);
@@ -323,6 +326,7 @@ function routeScore(c,mode='general'){
    score+=need*.1
  }else score+=need*.25;
  if(m&&m.next_review_at&&new Date(m.next_review_at)<=new Date())score+=mode==='review'?55:20;
+ let gb=goalBoost(c);if(gb&&mode!=='review'){score+=gb;reasons.push('learning goal')}
  let cq=curiosityQueue.find(q=>q.status==='queued'&&q.related_concept_key===c.key);if(cq&&blocked.length===0&&mode!=='review'){score+=22;reasons.push('saved curiosity')}
  if(mode!=='review'&&recentStats.share>.24){score-=Math.min(42,(recentStats.share-.24)*145);reasons.push('breadth balance')}
  if(mode==='frontier'&&recentStats.failRate>.45)score-=18;
@@ -343,39 +347,49 @@ function foundationTeachingCandidate(exclude=new Set()){
  let list=concepts.filter(c=>!exclude.has(c.key)&&(+c.level||1)<=2&&prereqs.filter(p=>p.concept_key===c.key).every(prereqSatisfied)).map(c=>({c,score:(30-(activityBySubject[c.subject_key]||0)*.25)+(interestKeys().has(c.subject_key)?8:0)+(CORE_LESSONS[c.key]?35:0)-recentCount(c.key,14)*18,reasons:['foundation lesson'],e:subjectEvidence(c.subject_key),m:conceptMastery(c.key),diagnostic:false})).sort((a,b)=>b.score-a.score);
  return list[0]||null
 }
-function sessionBlockCount(){let m=+profile?.daily_minutes||30;if(m<=10)return 2;if(m<=15)return 3;if(m<=30)return 4;if(m<=60)return 5;return 6}
+function sessionBlockCount(){let m=+profile?.daily_minutes||30;if(m<=15)return 1;if(m<=40)return 2;if(m<=60)return 3;return 4}
 function sessionAllocation(){
- let evidences=subjects.map(s=>subjectEvidence(s.key)),avgConf=evidences.length?evidences.reduce((a,e)=>a+(e.confidence||0),0)/evidences.length:0,measured=evidences.filter(e=>e.confidence>=35),weakest=measured.length?Math.min(...measured.map(e=>e.ability)):0;
- let due=dueLearnedReviews().length,n=sessionBlockCount(),base;
- // Daily sessions are for learning. Retrieval appears only when Atlas has actually taught the concept before.
- if(n===2)base=['gap','frontier'];
- else if(n===3)base=['gap','frontier',due?'review':'bridge'];
- else base=['gap','frontier','bridge',due?'review':'frontier'];
- while(base.length<n)base.push(base.length%3===0&&due?'review':(weakest<55?'gap':'frontier'));
- // A placement assessment already happened. Do not turn the first learning session into another battery of probes.
- if(completedAtlasLessons()<3)base=base.map(x=>['review','bridge'].includes(x)?'frontier':x);
- return base.slice(0,n)
+ let n=sessionBlockCount(),due=dueLearnedReviews().length,learned=completedAtlasLessons();
+ if(n===1)return ['lesson'];
+ if(n===2)return learned>=6&&due&&new Date().getDay()%3===0?['lesson','review']:['lesson','lesson'];
+ if(n===3)return learned>=5&&due?['lesson','lesson','review']:['lesson','lesson','lesson'];
+ return learned>=5&&due?['lesson','lesson','review','lesson']:['lesson','lesson','lesson','lesson']
+}
+function subjectTeachingCandidate(subjectKey,exclude=new Set(),anchorLevel=null){
+ let rows=concepts.filter(c=>c.subject_key===subjectKey&&!exclude.has(c.key)).map(c=>{let mode=subjectEvidence(subjectKey).confidence<35?'gap':'frontier',x=routeScore(c,mode);if(x.diagnostic)x.score=-9999;if(x.score>-9000){x.score+=(CORE_LESSONS[c.key]?45:0)+goalBoost(c);if(anchorLevel!=null)x.score+=Math.max(0,24-8*Math.abs((+c.level||1)-anchorLevel))}return x}).filter(x=>x.score>-9000).sort((a,b)=>b.score-a.score);return rows[0]||null
+}
+function primaryTeachingCandidate(exclude=new Set()){
+ let goalMatches=concepts.map(c=>{let mode=subjectEvidence(c.subject_key).confidence<35?'gap':'frontier',x=routeScore(c,mode);if(x.diagnostic)x.score=-9999;x.score+=goalBoost(c)+(CORE_LESSONS[c.key]?35:0);return x}).filter(x=>!exclude.has(x.c.key)&&x.score>-9000).sort((a,b)=>b.score-a.score);
+ return goalMatches[0]||foundationTeachingCandidate(exclude)||pickCandidate('frontier',exclude)||pickCandidate('gap',exclude)
 }
 function chooseSessionPlan(){
- let used=new Set(),plan=[],types=sessionAllocation();
- const add=(type)=>{
-  let excludedSubjects=type==='bridge'?new Set(plan.map(x=>x.route.c.subject_key)):new Set(),route=null;
-  if(type==='review'){
-   route=concepts.map(c=>routeScore(c,'review')).filter(x=>x.m&&x.m.next_review_at&&new Date(x.m.next_review_at)<=new Date()&&atlasTaughtConcept(x.c.key)).sort((a,b)=>b.score-a.score)[0]||null;
-   if(!route)type='frontier';
-  }
-  if(!route&&type==='gap'){
-   route=pickCandidate('gap',used,excludedSubjects,false);
-   if(route?.diagnostic)route=foundationTeachingCandidate(used);
-  }
-  if(!route&&type!=='review')route=pickCandidate(type,used,excludedSubjects,type==='bridge');
-  if(!route)route=foundationTeachingCandidate(used)||pickCandidate('general',used);
-  if(route){plan.push({type:type==='review'?'review':type,route});used.add(route.c.key)}
- };
- types.forEach(add);while(plan.length<types.length)add('frontier');return plan.slice(0,types.length)
+ let used=new Set(),plan=[],types=sessionAllocation(),primary=primaryTeachingCandidate(used);
+ if(!primary)return [];
+ plan.push({type:'lesson',route:primary,session_role:'primary'});used.add(primary.c.key);
+ for(let i=1;i<types.length;i++){
+   if(types[i]==='review'){
+     let review=concepts.map(c=>routeScore(c,'review')).filter(x=>x.m&&x.m.next_review_at&&new Date(x.m.next_review_at)<=new Date()&&atlasTaughtConcept(x.c.key)).sort((a,b)=>b.score-a.score)[0];
+     if(review){plan.push({type:'review',route:review,session_role:'retain'});continue}
+   }
+   // Prefer a nearby concept in the same subject so the session feels like a lesson arc, not channel surfing.
+   let same=subjectTeachingCandidate(primary.c.subject_key,used,+primary.c.level||1),next=same;
+   if(!next&&i===1){
+     // A second subject is allowed when it is a real bridge or much more aligned to the learner's stated goal.
+     let bridge=pickCandidate('bridge',used,new Set(),true),other=primaryTeachingCandidate(used);
+     next=(bridge&&bridge.score>(other?.score||-9999)-8)?bridge:other;
+   }
+   if(!next)next=primaryTeachingCandidate(used);
+   if(next){plan.push({type:'lesson',route:next,session_role:next.c.subject_key===primary.c.subject_key?'deepening':'secondary'});used.add(next.c.key)}
+ }
+ return plan.slice(0,types.length)
+}
+function nextIncompletePlanIndex(){for(let i=0;i<todayPlan.length;i++){let p=todayPlan[i],key=`${p.type}_${p.route.c.key}`;if(!todayDone.has(key))return i}return -1}
+async function startOrContinueDailySession(){
+ if(dailySessionComplete)return;
+ guidedSessionActive=true;await saveDailyProgress(false);renderToday();let i=nextIncompletePlanIndex();if(i>=0)openTask(i)
 }
 function getFrontier(){let pick=pickCandidate('frontier')||pickCandidate('general')||{};frontierConcept=pick.c||concepts[0];let subject=getSubject(frontierConcept?.subject_key),state=states.find(x=>x.subject_key===subject?.key);currentRoute=pick;return {subject,state,concept:frontierConcept,reasons:pick.reasons||[],score:pick.score||0}}
-async function loadApp(){show('app');$('logout').classList.remove('hidden');$('dailyMinutes').textContent=profile.daily_minutes;try{await loadCore();await restoreDailyProgress()}catch(err){setSystemStatus(err?.message||'Atlas could not load your learning map.','error');return}setSystemStatus(coreLoadWarning,coreLoadWarning?'warn':'');renderAll();if(localStorage.getItem('atlas_show_snapshot')==='1'){localStorage.removeItem('atlas_show_snapshot');let ranked=subjects.map(s=>({s,e:subjectEvidence(s.key)})).filter(x=>x.e.known).sort((a,b)=>b.e.ability-a.e.ability),strong=ranked[0],weak=ranked.filter(x=>x.e.confidence>=35).sort((a,b)=>a.e.ability-b.e.ability)[0],uncertain=subjects.map(s=>({s,e:subjectEvidence(s.key)})).filter(x=>x.e.confidence<35).slice(0,5);$('modalBody').innerHTML=`<div class="eyebrow">YOUR FIRST KNOWLEDGE MAP</div><h2>Here’s what Atlas learned about you.</h2><p><strong>Strongest signal:</strong> ${strong?.s.name||'still forming'}.</p><p><strong>Largest measured gap:</strong> ${weak?.s.name||'not enough evidence yet'}.</p><p><strong>Still uncertain:</strong> ${uncertain.map(x=>x.s.name).join(', ')||'very little'}.</p><div class="notice">This is a starting model, not a permanent label. Every session can move it.</div><button id="snapshotContinue" class="primary">Start my first adaptive session</button>`;$('modal').classList.remove('hidden');$('snapshotContinue').onclick=()=>$('modal').classList.add('hidden')}}
+async function loadApp(){show('app');$('logout').classList.remove('hidden');$('dailyMinutes').textContent=profile.daily_minutes;try{await loadCore();await syncStreakFromSessions();await restoreDailyProgress()}catch(err){setSystemStatus(err?.message||'Atlas could not load your learning map.','error');return}setSystemStatus(coreLoadWarning,coreLoadWarning?'warn':'');renderAll();if(localStorage.getItem('atlas_show_snapshot')==='1'){localStorage.removeItem('atlas_show_snapshot');let ranked=subjects.map(s=>({s,e:subjectEvidence(s.key)})).filter(x=>x.e.known).sort((a,b)=>b.e.ability-a.e.ability),strong=ranked[0],weak=ranked.filter(x=>x.e.confidence>=35).sort((a,b)=>a.e.ability-b.e.ability)[0],uncertain=subjects.map(s=>({s,e:subjectEvidence(s.key)})).filter(x=>x.e.confidence<35).slice(0,5);$('modalBody').innerHTML=`<div class="eyebrow">YOUR FIRST KNOWLEDGE MAP</div><h2>Here’s what Atlas learned about you.</h2><p><strong>Strongest signal:</strong> ${strong?.s.name||'still forming'}.</p><p><strong>Largest measured gap:</strong> ${weak?.s.name||'not enough evidence yet'}.</p><p><strong>Still uncertain:</strong> ${uncertain.map(x=>x.s.name).join(', ')||'very little'}.</p><div class="notice">This is a starting model, not a permanent label. Every session can move it.</div><button id="snapshotContinue" class="primary">Start my first adaptive session</button>`;$('modal').classList.remove('hidden');$('snapshotContinue').onclick=()=>$('modal').classList.add('hidden')}}
 function renderAll(){if(!todayPlan.length&&!dailySessionComplete)todayPlan=chooseSessionPlan();renderLearnerSnapshot();renderMap();renderPortfolio();renderForecast();renderToday();renderFrontier();renderWeekly();renderDiscovery();renderExplore();renderInsights();renderBuild();checkMilestones()}
 
 function discoveryCandidates(){
@@ -462,7 +476,7 @@ function renderForecast(){
  $('forecastChart').innerHTML=pts.map(([l,v])=>`<div class="forecast-col"><b>${v.toFixed(0)}</b><div class="forecast-bar" style="height:${Math.max(4,v)}%"></div><span>${l}</span></div>`).join('');
  $('forecastMilestones').innerHTML=[['6 months','Foundational gaps shrinking while strong areas keep advancing.'],['1 year','Broad literacy with visible interdisciplinary bridges.'],['3 years','A connected generalist base with several deep frontiers.'],['5 years','Potential for unusually broad competence plus advanced depth in selected domains.']].map(([a,b])=>`<div class="milestone"><strong>${a}</strong><span>${b}</span></div>`).join('')
 }
-function taskLabel(p){
+function taskLabel(p){if(p.type==='lesson')return ['Micro-lesson',`${getSubject(p.route.c.subject_key)?.name}: ${p.route.c.name}`,'Learn'];
  let c=p.route.c,s=getSubject(c.subject_key)?.name||c.subject_key;
  if(p.type==='review')return ['Review something you learned',`${s}: ${c.name}`,'Review'];
  if(p.type==='gap'&&p.route.diagnostic)return ['Quick calibration',`${s}: ${c.name}`,'Calibrate'];
@@ -473,21 +487,17 @@ function taskLabel(p){
 function renderToday(){
  let now=new Date(),m=sessions.filter(s=>s.completed&&new Date(s.completed_at||s.created_at).getMonth()===now.getMonth()&&new Date(s.completed_at||s.created_at).getFullYear()===now.getFullYear()).reduce((a,s)=>a+(s.actual_minutes||0),0);$('monthMinutes').textContent=m;
  if(!todayPlan.length&&!dailySessionComplete)todayPlan=chooseSessionPlan();
- if(dailySessionComplete){
-   $('todaySummary').textContent='Today’s planned learning session is complete. Atlas will not silently start another daily assessment. Your next planned session begins on the next study day.';
-   $('todayItems').innerHTML=todayPlan.map((p,i)=>{let [title,sub]=taskLabel(p);return `<div class="task done"><div><strong>${title}</strong><small>${sub}</small></div><span>✓</span></div>`}).join('')+`<div class="notice"><strong>Done for today.</strong> Frontier, Discovery, and Explore remain available for optional learning, but they do not restart your daily plan.</div>`;
-   $('allocationSummary').innerHTML='<span class="allocation-chip">Session complete</span>';$('sessionDone').textContent=`${todayPlan.length} / ${todayPlan.length} complete`;return
- }
- let summaryParts=[],firstByType=t=>todayPlan.find(x=>x.type===t);
- let reviewP=firstByType('review'),gapP=firstByType('gap'),frontP=firstByType('frontier'),bridgeP=firstByType('bridge');
- if(gapP)summaryParts.push(`a foundation lesson in ${getSubject(gapP.route.c.subject_key)?.name||'a core area'}`);
- if(frontP)summaryParts.push(`a next-step lesson in ${getSubject(frontP.route.c.subject_key)?.name||'your frontier'}`);
- if(bridgeP)summaryParts.push(`a connection lesson into ${getSubject(bridgeP.route.c.subject_key)?.name||'another field'}`);
- if(reviewP)summaryParts.push(`a short review of something Atlas previously taught you`);
- $('todaySummary').textContent=`This is a learning session, not another placement test. Your ${profile.daily_minutes}-minute plan contains ${summaryParts.join(', ')}. Each learning block teaches the idea before it checks understanding.`;
- $('todayItems').innerHTML=todayPlan.map((p,i)=>{let [title,sub,badge]=taskLabel(p),key=`${p.type}_${p.route.c.key}`;return `<button class="task ${todayDone.has(key)?'done':''}" data-plan="${i}" ${todayDone.has(key)?'disabled':''}><div><strong>${title}</strong><small>${sub} · ${p.route.reasons.slice(0,2).join(', ')||'adaptive priority'}</small></div><span>${todayDone.has(key)?'✓':badge+' ›'}</span></button>`}).join('');
- $('allocationSummary').innerHTML=sessionAllocation().map(x=>`<span class="allocation-chip">${x==='review'?'Review':'Learn'}</span>`).join('');$('sessionDone').textContent=`${todayDone.size} / ${todayPlan.length} complete`;document.querySelectorAll('.task[data-plan]').forEach(b=>b.onclick=()=>openTask(+b.dataset.plan));setTimeout(prefetchLearningObject,250)
+ let streak=+profile.current_streak||0,last=profile.last_active_on?String(profile.last_active_on).slice(0,10):null,today=localDayKey(),streakDone=last===today;
+ $('todayStreak').innerHTML=`<div><span class="streak-flame">🔥</span><strong>${streak} day${streak===1?'':'s'}</strong><span> current streak</span></div><small>${streakDone?'Today is already protected.':streak?`Complete today’s guided session to extend it to ${streak+1}.`:'Complete today’s guided session to start your streak.'} Longest: ${+profile.longest_streak||0}.</small>`;
+ let goal=String(profile.learning_goal||'').trim();$('sessionGoalLine').textContent=goal?`Today is biased toward your goal: “${goal}”`:'Atlas is balancing your measured gaps, frontier, interests, and long-term breadth. You can add a specific learning goal in Account.';
+ if(dailySessionComplete){$('todaySummary').textContent='Today’s guided learning session is complete. Atlas will not start another daily plan until the next study day.';$('startDailySession').textContent='Session complete';$('startDailySession').disabled=true;$('todayItems').innerHTML=todayPlan.map((p,i)=>{let c=p.route.c;return `<div class="task done"><div><strong>${i+1}. ${getSubject(c.subject_key)?.name} · ${c.name}</strong><small>${p.type==='review'?'Short retrieval':'Micro-lesson'} completed</small></div><span>✓</span></div>`}).join('')+`<div class="notice"><strong>Done for today.</strong> Optional Frontier, Discovery, and Explore do not restart the daily session.</div>`;$('allocationSummary').innerHTML='<span class="allocation-chip">Guided session complete</span>';$('sessionDone').textContent=`${todayPlan.length} / ${todayPlan.length} complete`;return}
+ let subjectsInPlan=[...new Set(todayPlan.filter(p=>p.type!=='review').map(p=>getSubject(p.route.c.subject_key)?.name).filter(Boolean))];
+ $('todaySummary').textContent=`This is one guided learning session, not a list of assessments. Atlas will lead you through ${todayPlan.length} focused ${todayPlan.length===1?'micro-lesson':'steps'}${subjectsInPlan.length?` centered on ${subjectsInPlan.join(subjectsInPlan.length>1?' and ':'')}`:''}. Each lesson teaches first, then checks understanding.`;
+ let next=nextIncompletePlanIndex();$('startDailySession').disabled=false;$('startDailySession').textContent=todayDone.size?`Continue session · step ${next+1} of ${todayPlan.length}`:`Start ${profile.daily_minutes}-minute guided session`;
+ $('todayItems').innerHTML=todayPlan.map((p,i)=>{let c=p.route.c,key=`${p.type}_${c.key}`,done=todayDone.has(key),current=i===next;return `<div class="task session-preview ${done?'done':''} ${current?'current':''}"><div><strong>${i+1}. ${p.type==='review'?'Short retrieval':'Micro-lesson'} · ${c.name}</strong><small>${getSubject(c.subject_key)?.name}${p.session_role==='deepening'?' · deepens the same subject':p.session_role==='secondary'?' · second focus':''}${p.route.reasons?.length?' · '+p.route.reasons.slice(0,2).join(', '):''}</small></div><span>${done?'✓':current?'Next':'Later'}</span></div>`}).join('');
+ $('allocationSummary').innerHTML=`<span class="allocation-chip">${profile.daily_minutes} minutes</span><span class="allocation-chip">${todayPlan.filter(p=>p.type!=='review').length} teaching block${todayPlan.filter(p=>p.type!=='review').length===1?'':'s'}</span>${todayPlan.some(p=>p.type==='review')?'<span class="allocation-chip">1 short retrieval</span>':''}`;$('sessionDone').textContent=`${todayDone.size} / ${todayPlan.length} complete`;setTimeout(prefetchLearningObject,250)
 }
+$('startDailySession').onclick=startOrContinueDailySession;
 function renderFrontier(){
  let top=pickCandidate('frontier')||pickCandidate('general'),f=top?{concept:top.c,subject:getSubject(top.c.subject_key),reasons:top.reasons}:getFrontier(),e=subjectEvidence(f.subject?.key);
  $('frontierCard').innerHTML=`<div class="eyebrow">${f.subject?.name||'Frontier'}</div><strong>${f.concept?.name||'Next concept'}</strong><p>${f.concept?.description||''}</p><div class="track-sub"><span>Demonstrated frontier: L${(e.boundary||0).toFixed(1)}/10</span><span>Confidence: ${e.known?e.confidence.toFixed(0)+'%':'low'}</span><span>Target difficulty: ${conceptDifficulty(f.concept)}/10</span><span>Why now: ${(f.reasons||[]).join(' · ')}</span></div>`
@@ -580,12 +590,16 @@ async function saveLearningObject(concept,route,data,difficulty){let row={user_i
 async function updateModality(modality,score,transfer=0,retained=0){if(!modality)return;let old=modalityPerf.find(x=>x.modality===modality),n=(+old?.attempts||0)+1,avg=((+old?.avg_score||0)*(n-1)+score)/n,tr=((+old?.transfer_score||0)*(n-1)+transfer)/n,dr=((+old?.delayed_retention||0)*(n-1)+retained)/n;await db.from('modality_performance').upsert({user_id:user.id,modality,attempts:n,avg_score:avg,transfer_score:tr,delayed_retention:dr,updated_at:new Date().toISOString()},{onConflict:'user_id,modality'});if(n>=3&&avg>=70&&profile.preferred_modality!==modality){await db.from('profiles').update({preferred_modality:modality,updated_at:new Date().toISOString()}).eq('user_id',user.id);profile.preferred_modality=modality}}
 async function recordMisconception(conceptKey,code,description,severity=.5){if(!code)return;let old=misconceptions.find(x=>x.concept_key===conceptKey&&x.code===code&&!x.resolved_at);await db.from('learner_misconceptions').upsert({user_id:user.id,concept_key:conceptKey,code,description,severity,evidence_count:(+old?.evidence_count||0)+1,last_seen_at:new Date().toISOString(),resolved_at:null},{onConflict:'user_id,concept_key,code'})}
 async function formConnection(fromKey,toKey,score){if(!fromKey||!toKey||fromKey===toKey||score<60)return;await db.from('knowledge_connections').upsert({user_id:user.id,from_concept_key:fromKey,to_concept_key:toKey,connection_type:'bridge',evidence_score:score,formed_at:new Date().toISOString()},{onConflict:'user_id,from_concept_key,to_concept_key,connection_type'})}
-async function updateStreak(){
- let today=new Date().toISOString().slice(0,10),last=profile.last_active_on;if(last===today)return;
- let gap=99;if(last){gap=Math.floor((new Date(today)-new Date(last))/86400000)}
- let grace=+profile.streak_grace_days||1,streak=(gap===1||gap<=grace+1)?(+profile.current_streak||0)+1:1,longest=Math.max(+profile.longest_streak||0,streak);
- await db.from('profiles').update({current_streak:streak,longest_streak:longest,last_active_on:today,build_seen:ATLAS_VERSION,updated_at:new Date().toISOString()}).eq('user_id',user.id);profile.current_streak=streak;profile.longest_streak=longest;profile.last_active_on=today
+function localDayKey(v=new Date()){let d=v instanceof Date?v:new Date(v);let y=d.getFullYear(),m=String(d.getMonth()+1).padStart(2,'0'),day=String(d.getDate()).padStart(2,'0');return `${y}-${m}-${day}`}
+function derivedStreak(){
+ let dates=[...new Set(sessions.filter(s=>s.completed).map(s=>localDayKey(s.completed_at||s.created_at)))].sort().reverse(),grace=+profile?.streak_grace_days||1;if(!dates.length)return {current:0,longest:Math.max(0,+profile?.longest_streak||0),last:null};
+ let today=localDayKey(),gapToday=Math.floor((new Date(today)-new Date(dates[0]))/86400000);if(gapToday>grace+1)return {current:0,longest:Math.max(0,+profile?.longest_streak||0),last:dates[0]};
+ let current=1;for(let i=1;i<dates.length;i++){let gap=Math.floor((new Date(dates[i-1])-new Date(dates[i]))/86400000);if(gap<=grace+1)current++;else break}
+ return {current,longest:Math.max(+profile?.longest_streak||0,current),last:dates[0]}
 }
+async function syncStreakFromSessions(){let d=derivedStreak(),last=profile.last_active_on?String(profile.last_active_on).slice(0,10):null;if(+profile.current_streak!==d.current||+profile.longest_streak!==d.longest||last!==d.last){let r=await db.from('profiles').update({current_streak:d.current,longest_streak:d.longest,last_active_on:d.last,build_seen:ATLAS_VERSION,updated_at:new Date().toISOString()}).eq('user_id',user.id);if(!r.error){profile.current_streak=d.current;profile.longest_streak=d.longest;profile.last_active_on=d.last}}return d}
+async function updateStreak(){return syncStreakFromSessions()}
+
 
 
 function curatedMediaFor(conceptKey){return curatedMedia.filter(x=>x.concept_key===conceptKey).slice(0,3)}
@@ -698,7 +712,7 @@ async function completeTask(planIndex){
  if(todayDone.size===todayPlan.length){
    let actual=Math.max(1,Math.min(profile.daily_minutes,Math.round(sessionActiveSeconds/60)));
    let r=await db.from('study_sessions').insert({user_id:user.id,planned_minutes:profile.daily_minutes,actual_minutes:actual,session_type:'adaptive_v065_learning',completed:true,completed_at:new Date().toISOString()});
-   if(!r.error){dailySessionComplete=true;await saveDailyProgress(true);await updateStreak();await loadCore();renderAll();celebrate(actual)}
+   if(!r.error){dailySessionComplete=true;guidedSessionActive=false;await saveDailyProgress(true);await loadCore();await syncStreakFromSessions();renderAll();celebrate(actual)}
    else setSystemStatus('Your lesson evidence was saved, but the session summary did not sync yet. Atlas will retry next time.','warn')
  }
 }
@@ -802,12 +816,14 @@ function openPage(page){
  if(page==='account')renderAccount();if(page==='insights')loadAdminAnalytics()
 }
 function renderAccount(){
- if(!$('accountName')||!profile)return;$('accountName').textContent=profile.display_name||user?.user_metadata?.display_name||'Atlas learner';$('accountEmail').textContent=user?.email||'—';$('accountBuild').textContent=ATLAS_VERSION;$('accountMinutes').value=String(profile.daily_minutes||30);$('accountDays').value=String(profile.days_per_week||5)
+ if(!$('accountName')||!profile)return;$('accountName').textContent=profile.display_name||user?.user_metadata?.display_name||'Atlas learner';$('accountEmail').textContent=user?.email||'—';$('accountBuild').textContent=ATLAS_VERSION;$('accountMinutes').value=String(profile.daily_minutes||30);$('accountDays').value=String(profile.days_per_week||5);if($('accountGoal'))$('accountGoal').value=profile.learning_goal||''
 }
+
+$('saveLearningGoal').onclick=async()=>{let goal=($('accountGoal')?.value||'').trim(),r=await db.from('profiles').update({learning_goal:goal||null,updated_at:new Date().toISOString()}).eq('user_id',user.id);if(r.error){$('accountMessage').textContent=r.error.message;return}profile.learning_goal=goal||null;if(todayDone.size===0&&!dailySessionComplete){todayPlan=[];guidedSessionActive=false;renderAll()}$('accountMessage').textContent=goal?'Learning goal saved. Atlas rebuilt today’s route around it.':'Learning goal cleared. Atlas will balance breadth, gaps, interests, and frontier.'};
 $('saveAccountSchedule').onclick=async()=>{let daily=+$('accountMinutes').value,days=+$('accountDays').value,r=await db.from('profiles').update({daily_minutes:daily,days_per_week:days,weekly_goal_minutes:daily*days,updated_at:new Date().toISOString()}).eq('user_id',user.id);if(r.error){$('accountMessage').textContent=r.error.message;return}profile.daily_minutes=daily;profile.days_per_week=days;profile.weekly_goal_minutes=daily*days;$('dailyMinutes').textContent=daily;if(todayDone.size===0&&!dailySessionComplete){todayPlan=[];renderAll();$('accountMessage').textContent='Learning schedule saved. Today’s plan has been resized to fit it.'}else $('accountMessage').textContent='Learning schedule saved. Your current in-progress session stays intact; the new timing applies to the next session.'};
 $('sendRecovery').onclick=async()=>{$('accountMessage').textContent='Sending recovery link…';let r=await db.auth.resetPasswordForEmail(user.email,{redirectTo:location.origin+location.pathname});$('accountMessage').textContent=r.error?r.error.message:'Recovery link sent to '+user.email+'.'};
 $('changePassword').onclick=async()=>{let a=$('newPassword').value,b=$('confirmPassword').value;if(a.length<8){$('accountMessage').textContent='Use at least 8 characters.';return}if(a!==b){$('accountMessage').textContent='Passwords do not match.';return}$('accountMessage').textContent='Updating password…';let r=await db.auth.updateUser({password:a});$('accountMessage').textContent=r.error?r.error.message:'Password updated.';if(!r.error){$('newPassword').value='';$('confirmPassword').value='';localStorage.removeItem('atlas_recovery_pending')}};
 
-async function boot(){let u=(await db.auth.getUser()).data.user;if(!u){$('logout').classList.add('hidden');show('auth');return}user=u;$('logout').classList.remove('hidden');let r=await db.from('profiles').select('*').eq('user_id',u.id).single();if(r.error){$('authMessage').textContent='Profile load failed: '+r.error.message;show('auth');return}profile=r.data;if(!profile.onboarding_complete){$('minutes').value=profile.daily_minutes;$('days').value=profile.days_per_week;show('onboarding');return}if(!['v0.4','v0.5','v0.6'].includes(profile.placement_version)){assessmentLanding();return}loadApp()}
+async function boot(){let u=(await db.auth.getUser()).data.user;if(!u){$('logout').classList.add('hidden');show('auth');return}user=u;$('logout').classList.remove('hidden');let r=await db.from('profiles').select('*').eq('user_id',u.id).single();if(r.error){$('authMessage').textContent='Profile load failed: '+r.error.message;show('auth');return}profile=r.data;if(!profile.onboarding_complete){$('minutes').value=profile.daily_minutes;$('days').value=profile.days_per_week;if($('onboardingGoal'))$('onboardingGoal').value=profile.learning_goal||'';show('onboarding');return}if(!['v0.4','v0.5','v0.6'].includes(profile.placement_version)){assessmentLanding();return}loadApp()}
 mode('signup');boot();
-window.addEventListener('pagehide',()=>{try{if(user&&attempt){let phase=!$('checkpoint').classList.contains('hidden')?'checkpoint':round>3?'open':'questions';localStorage.setItem(progressLocalKey('assessment'),JSON.stringify({attempt,round,qIndex,openIndex,draft:$('openText')?.value||'',phase,saved_at:new Date().toISOString()}))}if(user){let existing=progressCache[dailyProgressKey()]||{};localStorage.setItem(progressLocalKey(dailyProgressKey()),JSON.stringify({...existing,completed:dailySessionComplete||existing.completed||false,todayDone:[...todayDone],sessionActiveSeconds,plan:todayPlan.map(p=>({type:p.type,concept_key:p.route.c.key,diagnostic:!!p.route.diagnostic})),saved_at:new Date().toISOString()}))}}catch{}});
+window.addEventListener('pagehide',()=>{try{if(user&&attempt){let phase=!$('checkpoint').classList.contains('hidden')?'checkpoint':round>3?'open':'questions';localStorage.setItem(progressLocalKey('assessment'),JSON.stringify({attempt,round,qIndex,openIndex,draft:$('openText')?.value||'',phase,saved_at:new Date().toISOString()}))}if(user){let existing=progressCache[dailyProgressKey()]||{};localStorage.setItem(progressLocalKey(dailyProgressKey()),JSON.stringify({...existing,completed:dailySessionComplete||existing.completed||false,guidedSessionActive:!!guidedSessionActive,todayDone:[...todayDone],sessionActiveSeconds,plan:todayPlan.map(p=>({type:p.type,concept_key:p.route.c.key,diagnostic:!!p.route.diagnostic})),saved_at:new Date().toISOString()}))}}catch{}});

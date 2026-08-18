@@ -25,3 +25,7 @@ button:disabled{cursor:wait}
 .status-banner{margin:.75rem 0;padding:.7rem .9rem;border:1px solid var(--border);border-radius:12px;font-size:.9rem}
 .status-banner.status-warn{border-style:dashed}
 .status-banner.status-error{font-weight:700}
+
+.streak-card{display:flex;justify-content:space-between;gap:1rem;align-items:center;padding:.9rem 1.05rem;margin-bottom:1rem;border:1px solid var(--border);border-radius:16px;background:linear-gradient(135deg,rgba(255,176,32,.12),rgba(73,144,255,.08));}
+.streak-card strong{font-size:1.15rem;margin:0 .3rem}.streak-card small{color:var(--muted);text-align:right}.streak-flame{font-size:1.35rem}.session-start{margin-top:.8rem;min-height:52px;padding-left:1.4rem;padding-right:1.4rem}.session-start:disabled{opacity:.65}.session-preview{cursor:default}.session-preview.current{outline:2px solid rgba(112,169,255,.55);background:rgba(80,139,220,.10)}.session-hero{align-items:flex-start}
+@media(max-width:700px){.streak-card{align-items:flex-start;flex-direction:column}.streak-card small{text-align:left}.session-start{width:100%}.session-hero{display:block}.session-hero .deposit{margin-top:1rem}}

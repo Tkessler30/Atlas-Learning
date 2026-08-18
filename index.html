@@ -9,7 +9,7 @@
 <body>
 <main class="shell">
 <header class="site-header">
-  <div><div class="brand">ATLAS LEARNING <span id="buildBadge" class="build-badge">v0.6.5</span></div><h1>Build your knowledge portfolio.</h1><p>Time is the deposit. Knowledge retained is the return.</p></div>
+  <div><div class="brand">ATLAS LEARNING <span id="buildBadge" class="build-badge">v0.6.6</span></div><h1>Build your knowledge portfolio.</h1><p>Time is the deposit. Knowledge retained is the return.</p></div>
   <button id="logout" class="ghost hidden">Log out</button>
 </header>
 
@@ -35,6 +35,8 @@
       <label>Typical study time<select id="minutes"><option value="10">10 min/day</option><option value="15">15 min/day</option><option value="30">30 min/day</option><option value="45">45 min/day</option><option value="60">60 min/day</option><option value="90">90 min/day</option><option value="120">2 hr/day</option></select></label>
       <label>Days per week<select id="days"><option>3</option><option>4</option><option>5</option><option>6</option><option>7</option></select></label>
     </div>
+    <h3>What are you trying to get better at?</h3>
+    <label>Learning goal<textarea id="onboardingGoal" placeholder="Examples: become broadly well-rounded; understand economics and markets; get stronger in science for college; connect my trades experience to engineering."></textarea></label>
     <h3>Where do you want extra depth?</h3><div id="interests" class="chips"></div>
     <button class="primary">Save profile</button>
   </form>
@@ -73,8 +75,9 @@
 
 <section id="today" class="page">
   <div id="learnerSnapshot" class="card"></div>
-  <div class="card hero"><div><div class="eyebrow">TODAY'S DEPOSIT</div><h2><span id="dailyMinutes"></span>-minute session</h2><p id="todaySummary"></p></div><div class="deposit"><strong id="monthMinutes">0</strong><span>minutes invested this month</span></div></div>
-  <div class="card"><div class="section-title"><div><div class="eyebrow">SESSION ALLOCATION</div><h3>Adaptive mix</h3></div><span id="sessionDone" class="pill">0 / 4 complete</span></div><div id="allocationSummary" class="track-sub"></div><div id="todayItems" class="task-list"></div></div>
+  <div id="todayStreak" class="streak-card"></div>
+  <div class="card hero session-hero"><div><div class="eyebrow">TODAY'S GUIDED SESSION</div><h2><span id="dailyMinutes"></span>-minute session</h2><p id="todaySummary"></p><button id="startDailySession" class="primary session-start">Start today’s session</button><p id="sessionGoalLine" class="fineprint"></p></div><div class="deposit"><strong id="monthMinutes">0</strong><span>minutes invested this month</span></div></div>
+  <div class="card"><div class="section-title"><div><div class="eyebrow">TODAY'S ROUTE</div><h3>Focused learning path</h3></div><span id="sessionDone" class="pill">0 / 2 complete</span></div><div id="allocationSummary" class="track-sub"></div><div id="todayItems" class="task-list"></div></div>
 </section>
 
 
@@ -158,6 +161,9 @@
       <div><strong id="accountEmail">—</strong><span>email</span></div>
       <div><strong id="accountBuild">—</strong><span>version</span></div>
     </div>
+    <h3>Your learning goal</h3>
+    <label>What should Atlas help you become better at?<textarea id="accountGoal" placeholder="Describe the outcome you want. Atlas will use this to bias your learning route without abandoning broad knowledge."></textarea></label>
+    <button id="saveLearningGoal" class="secondary">Save learning goal</button>
     <h3>Learning schedule</h3>
     <div class="grid2">
       <label>Typical study time<select id="accountMinutes"><option value="10">10 min/day</option><option value="15">15 min/day</option><option value="30">30 min/day</option><option value="45">45 min/day</option><option value="60">60 min/day</option><option value="90">90 min/day</option><option value="120">2 hr/day</option></select></label>
@@ -180,6 +186,6 @@
 </section>
 
 <div id="celebration" class="celebration hidden"><div class="celebration-card"><div class="celebration-mark">✦</div><div class="eyebrow">KNOWLEDGE DEPOSIT COMPLETE</div><h2 id="celebrationTitle">Your portfolio grew.</h2><p id="celebrationText"></p><button id="closeCelebration" class="primary">See updated map</button></div></div><div id="modal" class="modal hidden"><div class="modal-card"><button id="closeModal" class="modal-close">×</button><div id="modalBody"></div></div></div>
-<footer class="app-footer">Atlas Learning <span id="footerBuild">v0.6.5</span> · adaptive learner engine</footer></main><script src="atlas-client.js"></script>
+<footer class="app-footer">Atlas Learning <span id="footerBuild">v0.6.6</span> · adaptive learner engine</footer></main><script src="atlas-client.js"></script>
 <script src="core-lessons.js"></script>
 <script src="app.js"></script></body></html>
