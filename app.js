@@ -1,6 +1,10 @@
 const URL='https://fhjutbhyvaamzzsipwaa.supabase.co';
 const KEY='sb_publishable_Ytbw_MTkDIhZP1KerZ4bAw_P7XPwFH_';
-const db=window.supabase.createClient(URL,KEY,{auth:{persistSession:true,autoRefreshToken:true,detectSessionInUrl:true}});
+const db=window.createAtlasClient(URL,KEY);
+window.addEventListener('error',e=>{
+  const el=document.getElementById('authMessage');
+  if(el) el.textContent='Atlas startup error: '+(e.message||'unknown error');
+});
 const $=id=>document.getElementById(id);
 let authMode='signup',user=null,profile=null,subjects=[],concepts=[],states=[],sessions=[],attempt=null,round=1,qIndex=0,answers=[],roundQs=[],openIndex=0,todayDone=new Set(),frontierConcept=null;
 const VIEWS=['auth','onboarding','assessmentIntro','assessment','checkpoint','app'];
