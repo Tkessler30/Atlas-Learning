@@ -2,13 +2,61 @@ const URL='https://fhjutbhyvaamzzsipwaa.supabase.co';
 const KEY='sb_publishable_Ytbw_MTkDIhZP1KerZ4bAw_P7XPwFH_';
 const db=window.createAtlasClient(URL,KEY);
 const CORE_LESSONS=window.ATLAS_CORE_LESSONS||{};
-const ATLAS_VERSION='v0.6.9',ATLAS_BUILD='2026.08.18';
+const ATLAS_VERSION='v0.7.0',ATLAS_BUILD='2026.08.18';
 window.addEventListener('error',e=>{
   const msg='Atlas hit an unexpected screen error. Your saved progress is not erased.';
   const status=document.getElementById('systemStatus'),auth=document.getElementById('authMessage');
   if(status&&!status.classList.contains('hidden')||document.getElementById('app')&&!document.getElementById('app').classList.contains('hidden')){if(status){status.textContent=msg;status.classList.remove('hidden');status.classList.add('status-error')}}else if(auth)auth.textContent=msg;
 });
 const $=id=>document.getElementById(id);
+
+const ATLAS_VERSION_MANIFEST='version.json';
+let atlasUpdateCheckInFlight=false;
+
+function atlasVersionToken(v){
+ return String(v||'').replace(/^v/i,'').replace(/[^0-9]+/g,'');
+}
+function cleanAtlasRefreshParams(){
+ try{
+  let u=new URL(location.href),changed=false;
+  if(u.searchParams.has('v')){u.searchParams.delete('v');changed=true}
+  if(u.searchParams.has('atlas_refresh')){u.searchParams.delete('atlas_refresh');changed=true}
+  if(changed)history.replaceState({},document.title,u.pathname+(u.searchParams.toString()?`?${u.searchParams}`:'')+u.hash)
+ }catch{}
+}
+async function checkForAtlasUpdate({showStatus=false}={}){
+ if(atlasUpdateCheckInFlight)return false;
+ atlasUpdateCheckInFlight=true;
+ try{
+  let stamp=Date.now(),r=await fetch(`${ATLAS_VERSION_MANIFEST}?atlas_check=${stamp}`,{
+   cache:'no-store',
+   headers:{'Cache-Control':'no-cache','Pragma':'no-cache'}
+  });
+  if(!r.ok)return false;
+  let latest=await r.json(),latestVersion=String(latest?.version||'').trim();
+  if(!latestVersion||latestVersion===ATLAS_VERSION)return false;
+
+  try{localStorage.setItem('atlas_latest_version',latestVersion)}catch{}
+  if(showStatus&&$('systemStatus')){
+   $('systemStatus').textContent=`A newer Atlas build (${latestVersion}) is available. Refreshing…`;
+   $('systemStatus').classList.remove('hidden')
+  }
+
+  // A unique query forces the browser to request a fresh index.html.
+  // The newly loaded build removes these temporary parameters from the address bar.
+  let u=new URL(location.href);
+  u.searchParams.set('v',atlasVersionToken(latestVersion)||latestVersion);
+  u.searchParams.set('atlas_refresh',String(stamp));
+  location.replace(u.href);
+  return true
+ }catch(err){
+  console.warn('Atlas update check skipped:',err);
+  return false
+ }finally{
+  atlasUpdateCheckInFlight=false
+ }
+}
+
 let authMode='signup',user=null,profile=null,subjects=[],concepts=[],states=[],sessions=[],masteries=[],interests=[],prereqs=[],events=[],attempt=null,round=1,qIndex=0,answers=[],roundQs=[],openIndex=0,todayDone=new Set(),frontierConcept=null,currentRoute=null,deepDiveSubjectKey=null,todayPlan=[],dailySessionComplete=false,guidedSessionActive=false,taskOpenedAt=0,sessionActiveSeconds=0,activityBySubject={},activityByConcept={},misconceptions=[],modalityPerf=[],curiosityQueue=[],learningObjects=[],connections=[],milestones=[],curatedMedia=[],activeLearningObject=null,assessmentBusy=false,progressCache={},activeDiscovery=null,discoverySeen=new Set(),prefetchInFlight=new Set(),coreLoadWarning='',sessionArc=null,sessionMode='balanced';
 const VIEWS=['auth','onboarding','assessmentIntro','assessment','checkpoint','app'];
 const EXTRA=['Science','Health & Medicine','Trades & Construction','Business & Leadership','Accounting & Economics','Technology & AI','History & Geopolitics','Psychology & Philosophy','Arts & Culture'];
@@ -758,6 +806,83 @@ async function updateStreak(){return syncStreakFromSessions()}
 
 function curatedMediaFor(conceptKey){return curatedMedia.filter(x=>x.concept_key===conceptKey).slice(0,3)}
 function renderTextBlock(v){if(!v)return '';if(Array.isArray(v))return `<ul>${v.map(x=>`<li>${typeof x==='string'?x:(x.text||x.detail||'')}</li>`).join('')}</ul>`;return String(v).split(/\n{2,}/).map(x=>`<p>${x}</p>`).join('')}
+
+function splitTeachingParagraphs(text){
+ return String(text||'').split(/\n{2,}/).map(x=>x.trim()).filter(Boolean)
+}
+function trustedSourcesFor(subjectKey){
+ let reg=window.ATLAS_SOURCE_REGISTRY||{},ids=reg.bySubject?.[subjectKey]||[];
+ return ids.map(id=>({id,...(reg.sources?.[id]||{})})).filter(x=>x.name&&x.url)
+}
+function sourceBadge(s){
+ let k=String(s.kind||'reference').replaceAll('_',' ');
+ return `<span class="source-badge">${k}</span>`
+}
+function renderResearchShelf(concept,d){
+ let used=Array.isArray(d?.sources)?d.sources.filter(x=>x&&x.url):[],trusted=trustedSourcesFor(concept?.subject_key).slice(0,4);
+ let usedHtml=used.length?`<div class="source-group"><strong>Sources used for this lesson</strong>${used.map(x=>`<div class="source-row"><div><a href="${x.url}" target="_blank" rel="noopener">${x.title||x.publisher||x.url}</a>${x.publisher?`<small>${x.publisher}</small>`:''}</div><span class="source-badge">lesson source</span></div>`).join('')}</div>`:'';
+ let shelfHtml=trusted.length?`<div class="source-group"><strong>Trusted reference shelf</strong><p class="fineprint">These are high-quality places Atlas uses or prioritizes for this subject. They are not automatically claimed as the exact source of every sentence above.</p>${trusted.map(s=>`<div class="source-row"><div><a href="${s.url}" target="_blank" rel="noopener">${s.name}</a><small>${s.region||''} · ${s.reuse||'Check source terms'}</small></div>${sourceBadge(s)}</div>`).join('')}</div>`:'';
+ return `<div class="research-shelf">${usedHtml}${shelfHtml}<p class="fineprint"><strong>Source policy:</strong> Atlas writes teaching in its own words. It does not copy proprietary course content or protected source prose merely because the facts are useful.</p></div>`
+}
+function lessonDraftKey(c){return `atlas_lesson_v070_${user?.id||'anon'}_${new Date().toISOString().slice(0,10)}_${c?.key||'lesson'}`}
+function loadLessonDraft(c){try{return JSON.parse(localStorage.getItem(lessonDraftKey(c))||'null')||{}}catch{return {}}}
+function saveLessonDraft(c,patch={}){
+ try{let cur=loadLessonDraft(c);localStorage.setItem(lessonDraftKey(c),JSON.stringify({...cur,...patch,saved_at:new Date().toISOString()}))}catch{}
+}
+function clearLessonDraft(c){try{localStorage.removeItem(lessonDraftKey(c))}catch{}}
+function lessonStageEstimate(totalMinutes,stageCount){return Math.max(1,Math.round((+totalMinutes||8)/Math.max(1,stageCount)))}
+function renderDeepLesson(data,f,type,p,opts,hasCheck,media){
+ let c=f.concept,paras=splitTeachingParagraphs(data.explanation||data.core_idea||''),worked=data.worked_example||data.example||null,minutes=Math.max(6,+p.estimated_minutes||+data.suggested_minutes||8);
+ let first=paras.slice(0,Math.max(1,Math.ceil(paras.length/2))).join('\n\n'),second=paras.slice(Math.max(1,Math.ceil(paras.length/2))).join('\n\n');
+ let scenario=sessionArc?.scenario||data.transfer_case?.scenario||`Find a real situation where ${c.name} changes a prediction or decision.`;
+ let q=data.quiz||null;
+ let stages=[
+  `<div class="eyebrow">1 · ORIENT</div><h3>Build the map before the details</h3>${data.objective?`<div class="notice"><strong>Goal:</strong> ${data.objective}</div>`:''}${renderKeyTerms(data)}<div class="ai-section"><strong>Why this matters today</strong><p>${scenario}</p>${sessionArc?`<p class="fineprint">${arcRoleForConcept(c)}</p>`:''}</div>`,
+  `<div class="eyebrow">2 · BUILD THE MODEL</div><h3>Understand the mechanism</h3><div class="ai-section learn-section">${renderTextBlock(first||data.explanation||'')}</div>${renderVisual(data)}${Array.isArray(data.common_mistakes)&&data.common_mistakes.length?`<div class="ai-section"><strong>Watch for these traps</strong><ul>${data.common_mistakes.map(x=>`<li>${x}</li>`).join('')}</ul></div>`:''}`,
+  `<div class="eyebrow">3 · DEEPEN</div><h3>Follow the idea one layer further</h3><div class="ai-section learn-section">${renderTextBlock(second||data.connection?.explanation||data.takeaway||'')}</div>${renderConnection(data)}${data.takeaway?`<div class="notice"><strong>Core takeaway:</strong> ${data.takeaway}</div>`:''}`,
+  `<div class="eyebrow">4 · WORKED EXAMPLE</div><h3>Watch the reasoning happen</h3>${worked?`<div class="ai-section"><strong>${worked.setup?'Situation':'Example'}</strong>${worked.setup?`<p>${worked.setup}</p>`:''}<p><strong>Before revealing the solution:</strong> What would you do first, and why?</p><textarea id="workedPrediction" placeholder="Your first step or prediction…"></textarea><button id="revealWorked" class="secondary">Reveal the worked solution</button><div id="workedSolution" class="hidden">${renderWorked(data)}</div></div>`:`<div class="notice">No worked example is available for this lesson yet. Atlas will not invent one.</div>`}`,
+  `<div class="eyebrow">5 · PRACTICE WITH SUPPORT</div><h3>Now you do the thinking</h3>${data.challenge?`<div class="ai-section"><strong>Guided practice</strong>${renderTextBlock(data.challenge)}</div>`:''}<textarea id="guidedPracticeText" placeholder="Work through the reasoning here. It is okay to be incomplete."></textarea>${data.hint?`<button id="showLessonHint" class="ghost">I need a hint</button><div id="lessonHint" class="notice hidden"><strong>Hint:</strong> ${data.hint}</div>`:`<div class="fineprint">If you get stuck, go back one stage and study the worked example again.</div>`}`,
+  `<div class="eyebrow">6 · TRANSFER</div><h3>Use it outside the example</h3><div class="notice"><strong>Real situation:</strong> ${scenario}</div><p>${makeItStickPrompt(c)}</p><textarea id="lessonReflection" placeholder="Explain the connection in your own words…"></textarea>${type==='bridge'&&data.connection?'<textarea id="applyText" placeholder="What is the shared mechanism, and where does the analogy break?"></textarea>':''}`,
+ ];
+ if(hasCheck)stages.push(`<div class="eyebrow">7 · MASTERY CHECK</div><h3>Can you use the idea without the lesson in front of you?</h3><p>${q.prompt}</p>${opts}<p id="taskQuizMsg" class="fineprint">Use “I don’t know yet” instead of guessing. Feedback appears immediately.</p><button id="taskDone" class="primary" disabled>Finish lesson</button>`);
+ else stages.push(`<div class="eyebrow">7 · COMPLETE THE EXPOSURE</div><h3>Teaching complete; verification comes later</h3><div class="notice">This lesson has no validated concept-specific check, so Atlas will record exposure only—not verified mastery.</div><button id="taskDone" class="primary">Finish lesson</button>`);
+ stages.push(`<div class="eyebrow">8 · SOURCES & NEXT STEPS</div><h3>Check the knowledge behind the lesson</h3>${renderResearchShelf(c,data)}${media.length?`<div class="source-group"><strong>Curated media</strong>${media.map(m=>`<div class="source-row"><div><a href="${m.url}" target="_blank" rel="noopener">${m.title}</a><small>${m.provider}</small></div><span class="source-badge">media</span></div>`).join('')}</div>`:''}`);
+ let per=lessonStageEstimate(minutes,stages.length);
+ return `<div class="lesson-depth-shell" data-concept="${c.key}">
+   <div class="lesson-depth-head"><div><span class="depth-label">GUIDED LESSON · ~${minutes} MIN</span><strong>${data.title||c.name}</strong></div><span id="lessonStageCount">Step 1 of ${stages.length}</span></div>
+   <div class="lesson-stage-track"><div id="lessonStageBar" class="lesson-stage-fill" style="width:${100/stages.length}%"></div></div>
+   <p class="fineprint">Each step is designed for roughly ${per} minute${per===1?'':'s'}. Move at your own pace; Atlas does not reward rushing.</p>
+   ${stages.map((s,i)=>`<section class="lesson-stage ${i?'hidden':''}" data-stage="${i}">${s}</section>`).join('')}
+   <div class="lesson-stage-nav"><button id="lessonPrev" class="ghost" disabled>← Back</button><button id="lessonNext" class="primary">Continue →</button></div>
+ </div>`
+}
+function wireDeepLesson(data,f,type,p,hasCheck){
+ let stages=[...document.querySelectorAll('.lesson-stage')],draft=loadLessonDraft(f.concept),idx=Math.min(stages.length-1,Math.max(0,+draft.stage||0));
+ function restoreInputs(){
+  [['workedPrediction','workedPrediction'],['guidedPracticeText','guidedPracticeText'],['lessonReflection','lessonReflection'],['applyText','applyText']].forEach(([id,k])=>{let el=$(id);if(el&&draft[k])el.value=draft[k]});
+ }
+ function persist(){
+  saveLessonDraft(f.concept,{stage:idx,workedPrediction:$('workedPrediction')?.value||'',guidedPracticeText:$('guidedPracticeText')?.value||'',lessonReflection:$('lessonReflection')?.value||'',applyText:$('applyText')?.value||''})
+ }
+ function show(n){
+  idx=Math.max(0,Math.min(stages.length-1,n));stages.forEach((s,i)=>s.classList.toggle('hidden',i!==idx));
+  $('lessonPrev').disabled=idx===0;$('lessonNext').classList.toggle('hidden',idx===stages.length-1||!!$('taskDone')&&stages[idx].contains($('taskDone')));
+  $('lessonStageCount').textContent=`Step ${idx+1} of ${stages.length}`;$('lessonStageBar').style.width=`${((idx+1)/stages.length)*100}%`;persist();
+  document.querySelector('.modal-card')?.scrollTo({top:0,behavior:'smooth'})
+ }
+ $('lessonPrev').onclick=()=>show(idx-1);
+ $('lessonNext').onclick=()=>{
+  if(idx===3&&$('workedPrediction')&&($('workedPrediction').value||'').trim().length<8)return alert('Make a quick prediction before revealing the worked solution. It can be wrong.');
+  if(idx===4&&$('guidedPracticeText')&&($('guidedPracticeText').value||'').trim().length<20)return alert('Try the guided practice before moving on. A few lines of reasoning is enough.');
+  if(idx===5&&(+profile.daily_minutes||30)>=30&&$('lessonReflection')&&($('lessonReflection').value||'').trim().length<25)return alert('Explain the idea in your own words before the mastery check. This is where a lot of the learning happens.');
+  show(idx+1)
+ };
+ if($('revealWorked'))$('revealWorked').onclick=()=>{$('workedSolution').classList.remove('hidden');$('revealWorked').classList.add('hidden');persist()};
+ if($('showLessonHint'))$('showLessonHint').onclick=()=>{$('lessonHint').classList.remove('hidden');$('showLessonHint').classList.add('hidden')};
+ document.querySelectorAll('.lesson-depth-shell textarea').forEach(t=>t.addEventListener('input',persist));
+ restoreInputs();show(idx)
+}
+
 function renderKeyTerms(d){let a=d?.key_terms||[];if(!Array.isArray(a)||!a.length)return '';return `<div class="ai-section"><strong>Key terms</strong>${a.map(x=>typeof x==='string'?`<p><b>${x}</b></p>`:`<p><b>${x.term||''}</b>${x.definition?`: ${x.definition}`:''}</p>`).join('')}</div>`}
 function renderWorked(d){let w=d?.worked_example||d?.example;if(!w)return '';if(typeof w==='string')return `<div class="ai-section"><strong>Worked example</strong>${renderTextBlock(w)}</div>`;let steps=Array.isArray(w.steps)?`<ol>${w.steps.map(x=>`<li>${typeof x==='string'?x:(x.text||x.detail||'')}</li>`).join('')}</ol>`:'';return `<div class="ai-section"><strong>Worked example</strong>${w.setup?`<p>${w.setup}</p>`:''}${steps}${w.result?`<p><strong>Result:</strong> ${w.result}</p>`:''}${w.why_it_matters?`<p><strong>Why it matters:</strong> ${w.why_it_matters}</p>`:''}</div>`}
 function renderConnection(d){let c=d?.connection;if(!c)return '';if(typeof c==='string')return `<div class="ai-section"><strong>Why this connects</strong>${renderTextBlock(c)}</div>`;return `<div class="ai-section"><strong>Why this connects</strong>${c.shared_mechanism?`<p><strong>Shared mechanism:</strong> ${c.shared_mechanism}</p>`:''}${c.explanation?`<p>${c.explanation}</p>`:''}${c.difference?`<p><strong>Where the analogy breaks:</strong> ${c.difference}</p>`:''}${c.why_useful?`<p><strong>Why the connection helps:</strong> ${c.why_useful}</p>`:''}</div>`}
@@ -784,7 +909,7 @@ async function ai(mode){
  let core=mode==='lesson'?coreLessonFor(f.concept):null;if(core){renderAI(core);return}
  let cached=learningObjects.find(x=>x.concept_key===f.concept.key&&x.route_type===mode&&+x.difficulty===difficulty&&Date.now()-new Date(x.created_at).getTime()<3*864e5);
  if(cached?.payload&&Object.keys(cached.payload).length){activeLearningObject=cached;renderAI(cached.payload);return}
- let ctx=learnerContextFor(f.concept,mode);ctx.mode=mode;ctx.minutes=Math.max(6,Math.min(30,Math.round(profile.daily_minutes*.55)));let {data,error}=await db.functions.invoke('atlas-ai-content',{body:ctx});
+ let ctx=learnerContextFor(f.concept,mode);ctx.mode=mode;ctx.minutes=Math.max(6,Math.min(30,Math.round(profile.daily_minutes*.55)));ctx.lesson_minutes=ctx.minutes;ctx.depth_profile='guided_deep';ctx.require_sources=true;ctx.trusted_source_domains=trustedSourcesFor(f.concept.subject_key).map(s=>{try{return new URL(s.url).hostname}catch{return ''}}).filter(Boolean);let {data,error}=await db.functions.invoke('atlas-ai-content',{body:ctx});
  if(error||!data){$('aiOutput').innerHTML='<p>Atlas could not generate this object right now. Your daily plan is still available.</p>';return}
  await saveLearningObject(f.concept,mode,data,difficulty);renderAI(data)
 }
@@ -814,7 +939,7 @@ async function openTask(planIndex){
    $('modalBody').innerHTML=`<div class="eyebrow">SHORT REVIEW · ${f.subject?.name||''}</div><h2>${f.concept?.name}</h2><div class="notice">This review comes after a prior Atlas lesson. It is not new teaching.</div>${origin?.payload?.takeaway?`<p class="fineprint">Do not open the old lesson yet. First recall the key idea from memory.</p>`:''}<textarea id="retrieveText" placeholder="What do you remember about the mechanism? Give one concrete example if you can."></textarea><label class="fineprint">How complete did your recall feel?</label><select id="recallQuality"><option value="uncertain">Uncertain — major gaps</option><option value="partial">Partial — main idea, missing detail</option><option value="clear">Clear — mechanism and detail</option></select><button id="taskDone" class="primary">Evaluate retrieval</button>`;
    $('taskDone').dataset.provider='openai_evaluator';$('taskDone').dataset.modality='retrieval';$('taskDone').onclick=()=>completeTask(planIndex)
  }else{
-   let isProbe=type==='gap'&&p.route.diagnostic,routeKey=isProbe?'probe':type,mode=type==='bridge'?'application':isProbe?'question':'lesson',ctx=learnerContextFor(f.concept,routeKey);ctx.mode=mode;ctx.preferred_modality=modalityWinner();
+   let isProbe=type==='gap'&&p.route.diagnostic,routeKey=isProbe?'probe':type,mode=type==='bridge'?'application':isProbe?'question':'lesson',ctx=learnerContextFor(f.concept,routeKey);ctx.mode=mode;ctx.preferred_modality=modalityWinner();ctx.lesson_minutes=Math.max(6,+p.estimated_minutes||8);ctx.depth_profile='guided_deep';ctx.require_sources=!isProbe;ctx.trusted_source_domains=trustedSourcesFor(f.concept.subject_key).map(s=>{try{return new URL(s.url).hostname}catch{return ''}}).filter(Boolean);
    let cached=learningObjects.find(x=>x.concept_key===f.concept.key&&x.route_type===routeKey&&+x.difficulty===conceptDifficulty(f.concept)&&!x.completed_at&&Date.now()-new Date(x.created_at).getTime()<3*864e5),core=!isProbe&&type!=='bridge'?coreLessonFor(f.concept):null,data=core||cached?.payload||null,error=null;
    if(cached)activeLearningObject=cached;
    if(core&&!cached)await saveLearningObject(f.concept,routeKey,core,conceptDifficulty(f.concept));
@@ -823,8 +948,8 @@ async function openTask(planIndex){
      $('modalBody').innerHTML=`<div class="eyebrow">LESSON NOT AVAILABLE</div><h2>${f.concept?.name}</h2><div class="notice">Atlas could not load real instructional content for this concept. It will not replace teaching with a generic quiz.</div><p>${data?.note||'Try another lesson while the content provider is restored.'}</p><button id="taskCancelUnavailable" class="primary">Return to Today</button>`;$('taskCancelUnavailable').onclick=()=>$('modal').classList.add('hidden');$('modal').classList.remove('hidden');return
    }
    let q=data.quiz||null,hasCheck=!!(q&&Number.isInteger(q.correct_index)&&Array.isArray(q.options)&&q.options.length>=2),opts=hasCheck?q.options.map((x,i)=>`<button class="answer taskQuiz" type="button" data-i="${i}">${x}</button>`).join('')+`<button class="answer taskQuiz idk-answer" type="button" data-i="-1">I don’t know yet</button>`:'',media=curatedMediaFor(f.concept.key);
-   $('modalBody').innerHTML=isProbe?`<div class="eyebrow">QUICK CALIBRATION · ${f.subject?.name||''}</div><h2>${f.concept?.name}</h2><div class="notice">This is the one exception: a short map calibration, not a lesson. Atlas keeps these separate from teaching.</div><div class="ai-section"><strong>Diagnostic check</strong><p>${q?.prompt||'Choose the best answer.'}</p>${opts}</div><button id="taskDone" class="primary" disabled>Record calibration</button>`:`<div class="eyebrow">${teachingProviderLabel(data)} · ${f.subject?.name||''}</div><h2>${data.title||f.concept?.name}</h2>${sessionArc?`<div class="notice session-context"><strong>Today’s situation:</strong> ${sessionArc.scenario}<br><span>${arcRoleForConcept(f.concept)}</span></div>`:''}${renderTeachingBody(data)}${data.challenge?`<div class="ai-section"><strong>Guided practice</strong>${renderTextBlock(data.challenge)}${data.hint?`<p class="fineprint"><strong>Hint:</strong> ${data.hint}</p>`:''}</div>`:''}${(+profile.daily_minutes||30)>=30?`<div class="ai-section"><strong>Make it stick</strong><p>${makeItStickPrompt(f.concept)}</p><textarea id="lessonReflection" placeholder="One or two sentences in your own words…"></textarea></div>`:''}${media.length?`<div class="ai-section"><strong>Curated media</strong>${media.map(m=>`<p><a href="${m.url}" target="_blank" rel="noopener">${m.title} · ${m.provider}</a></p>`).join('')}</div>`:''}${type==='bridge'&&data.connection?'<textarea id="applyText" placeholder="In your own words, explain the shared mechanism and where the connection breaks…"></textarea>':''}${hasCheck?`<button id="revealTaskCheck" class="primary">I learned this — check my understanding</button><div id="taskCheck" class="ai-section hidden"><strong>Quick check</strong><p>${q.prompt}</p>${opts}<p id="taskQuizMsg" class="fineprint">Use “I don’t know yet” instead of guessing.</p></div><button id="taskDone" class="primary hidden" disabled>Finish lesson</button>`:`<div class="notice">This source provides real teaching material but no validated quiz. Atlas will record this as exposure only, not verified mastery.</div><button id="taskDone" class="primary">Finish lesson</button>`}`;
-   if($('revealTaskCheck'))$('revealTaskCheck').onclick=()=>{let reflection=($('lessonReflection')?.value||'').trim();if((+profile.daily_minutes||30)>=30&&reflection.length<25)return alert('Take a moment to connect the lesson to today’s situation first — one or two sentences is enough.');$('taskCheck').classList.remove('hidden');$('revealTaskCheck').classList.add('hidden');$('taskDone').classList.remove('hidden')};
+   $('modalBody').innerHTML=isProbe?`<div class="eyebrow">QUICK CALIBRATION · ${f.subject?.name||''}</div><h2>${f.concept?.name}</h2><div class="notice">This is the one exception: a short map calibration, not a lesson. Atlas keeps these separate from teaching.</div><div class="ai-section"><strong>Diagnostic check</strong><p>${q?.prompt||'Choose the best answer.'}</p>${opts}</div><button id="taskDone" class="primary" disabled>Record calibration</button>`:`<div class="eyebrow">${teachingProviderLabel(data)} · ${f.subject?.name||''}</div>${renderDeepLesson(data,f,type,p,opts,hasCheck,media)}`;
+   if(!isProbe)wireDeepLesson(data,f,type,p,hasCheck);
    $('taskDone').dataset.provider=data.provider||'unknown';$('taskDone').dataset.modality=data.modality||type;$('taskDone').dataset.objectId=activeLearningObject?.id||'';$('taskDone').dataset.noCheck=hasCheck?'0':'1';$('taskDone').dataset.bridgeHasConnection=data.connection?'1':'0';
    document.querySelectorAll('.taskQuiz').forEach(b=>b.onclick=()=>{let selected=+b.dataset.i;document.querySelectorAll('.taskQuiz').forEach(x=>x.classList.toggle('selected',x===b));$('taskDone').disabled=false;$('taskDone').dataset.selected=selected;$('taskDone').dataset.correct=q.correct_index??-999;let msg=selected<0?'Good choice. Review the lesson instead of guessing.':selected===q.correct_index?`Correct. ${q.rationale||''}`:`Not yet. ${Array.isArray(q.feedback)?(q.feedback[selected]||q.rationale||'Re-read the explanation above.'):(q.rationale||'Re-read the explanation above.')}`;if($('taskQuizMsg'))$('taskQuizMsg').textContent=msg;if(selected!==q.correct_index&&Array.isArray(q.misconceptions))$('taskDone').dataset.misconception=q.misconceptions[selected]||''});
    $('taskDone').onclick=()=>completeTask(planIndex)
@@ -871,7 +996,7 @@ async function completeTask(planIndex){
  if(probeFallback){let pr=await db.from('learning_events').insert({user_id:user.id,concept_key:concept.key,event_type:'probe_unverified',score:null,difficulty,duration_seconds:elapsed,modality:'probe',route_type:'probe',provider,learning_object_id:objectId||null,bridge_source:bridgeFrom});saveResult={ok:!pr.error,message:pr.error?.message}}
  else saveResult=await recordEvidence(concept,type,score,difficulty,elapsed,{provider,modality,learning_object_id:objectId,bridge_source:bridgeFrom,instruction_only:$('taskDone')?.dataset.noCheck==='1'});
  if(!saveResult.ok){if(doneBtn){doneBtn.disabled=false;doneBtn.textContent='Retry saving'}let msg=$('taskQuizMsg')||$('reviewEval');if(msg)msg.textContent='Atlas could not save this evidence yet. Your work is still on screen—please retry.';setSystemStatus('Learning evidence did not sync. Atlas did not count this block as complete.','error');return}
- sessionActiveSeconds+=elapsed;todayDone.add(key);saveDailyProgress();setSystemStatus(coreLoadWarning,coreLoadWarning?'warn':'');
+ sessionActiveSeconds+=elapsed;todayDone.add(key);clearLessonDraft(concept);saveDailyProgress();setSystemStatus(coreLoadWarning,coreLoadWarning?'warn':'');
  let outcomeModality=modality;
  if(type==='review'){let origin=learningObjects.filter(x=>x.concept_key===concept.key&&x.completed_at&&x.route_type!=='review').sort((a,b)=>new Date(b.completed_at)-new Date(a.completed_at))[0];outcomeModality=origin?.modality||modality}
  let enrichment=[];
@@ -996,6 +1121,23 @@ $('saveAccountSchedule').onclick=async()=>{let daily=+$('accountMinutes').value,
 $('sendRecovery').onclick=async()=>{$('accountMessage').textContent='Sending recovery link…';let r=await db.auth.resetPasswordForEmail(user.email,{redirectTo:location.origin+location.pathname});$('accountMessage').textContent=r.error?r.error.message:'Recovery link sent to '+user.email+'.'};
 $('changePassword').onclick=async()=>{let a=$('newPassword').value,b=$('confirmPassword').value;if(a.length<8){$('accountMessage').textContent='Use at least 8 characters.';return}if(a!==b){$('accountMessage').textContent='Passwords do not match.';return}$('accountMessage').textContent='Updating password…';let r=await db.auth.updateUser({password:a});$('accountMessage').textContent=r.error?r.error.message:'Password updated.';if(!r.error){$('newPassword').value='';$('confirmPassword').value='';localStorage.removeItem('atlas_recovery_pending')}};
 
-async function boot(){let u=(await db.auth.getUser()).data.user;if(!u){$('logout').classList.add('hidden');show('auth');return}user=u;$('logout').classList.remove('hidden');let r=await db.from('profiles').select('*').eq('user_id',u.id).single();if(r.error){$('authMessage').textContent='Profile load failed: '+r.error.message;show('auth');return}profile=r.data;if(!profile.onboarding_complete){$('minutes').value=profile.daily_minutes;$('days').value=profile.days_per_week;if($('onboardingGoal'))$('onboardingGoal').value=profile.learning_goal||'';show('onboarding');return}if(!['v0.4','v0.5','v0.6'].includes(profile.placement_version)){assessmentLanding();return}loadApp()}
+async function boot(){
+ let updated=await checkForAtlasUpdate();if(updated)return;
+ cleanAtlasRefreshParams();
+ let u=(await db.auth.getUser()).data.user;
+ if(!u){$('logout').classList.add('hidden');show('auth');return}
+ user=u;$('logout').classList.remove('hidden');
+ let r=await db.from('profiles').select('*').eq('user_id',u.id).single();
+ if(r.error){$('authMessage').textContent='Profile load failed: '+r.error.message;show('auth');return}
+ profile=r.data;
+ if(!profile.onboarding_complete){$('minutes').value=profile.daily_minutes;$('days').value=profile.days_per_week;if($('onboardingGoal'))$('onboardingGoal').value=profile.learning_goal||'';show('onboarding');return}
+ if(!['v0.4','v0.5','v0.6'].includes(profile.placement_version)){assessmentLanding();return}
+ loadApp()
+}
 mode('signup');boot();
+
+document.addEventListener('visibilitychange',()=>{
+ if(document.visibilityState==='visible')checkForAtlasUpdate({showStatus:true})
+});
+setInterval(()=>checkForAtlasUpdate({showStatus:true}),5*60*1000);
 window.addEventListener('pagehide',()=>{try{if(user&&attempt){let phase=!$('checkpoint').classList.contains('hidden')?'checkpoint':round>3?'open':'questions';localStorage.setItem(progressLocalKey('assessment'),JSON.stringify({attempt,round,qIndex,openIndex,draft:$('openText')?.value||'',phase,saved_at:new Date().toISOString()}))}if(user){let existing=progressCache[dailyProgressKey()]||{};localStorage.setItem(progressLocalKey(dailyProgressKey()),JSON.stringify({...existing,plan_version:'v067',completed:dailySessionComplete||existing.completed||false,guidedSessionActive:!!guidedSessionActive,sessionMode,sessionArc,todayDone:[...todayDone],sessionActiveSeconds,plan:todayPlan.map(p=>({type:p.type,concept_key:p.route.c.key,diagnostic:!!p.route.diagnostic,session_role:p.session_role||null,estimated_minutes:p.estimated_minutes||null})),saved_at:new Date().toISOString()}))}}catch{}});
