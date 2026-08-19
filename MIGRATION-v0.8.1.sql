@@ -1,0 +1,3 @@
+-- Applied live before this package was produced. Additive only.
+-- Creates assessment_open_evaluations; adds diagnostic pattern columns and assessment strength/reasoning columns;
+-- expands snapshot_current_user_state to include assessment reasoning + tutor data.

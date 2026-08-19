@@ -53,6 +53,13 @@ class AtlasClient{
  }
  headers(){let h={'apikey':this.key,'Content-Type':'application/json'};let t=this.token();if(t)h.Authorization='Bearer '+t;return h}
  from(t){return new AtlasQuery(this,t)}
+ async rpc(name,body={}){
+  await this.ensureSession();
+  let r=await fetch(`${this.url}/rest/v1/rpc/${encodeURIComponent(name)}`,{method:'POST',headers:this.headers(),body:JSON.stringify(body||{})});
+  let text=await r.text(),data=null;try{data=text?JSON.parse(text):null}catch{}
+  if(!r.ok)return {data:null,error:{message:data?.message||data?.msg||text||`HTTP ${r.status}`,code:data?.code}};
+  return {data,error:null}
+ }
  captureRedirect(){
   const hash=new URLSearchParams(location.hash.replace(/^#/,''));
   const at=hash.get('access_token'),rt=hash.get('refresh_token'),type=hash.get('type');
