@@ -1,7 +1,8 @@
 {
-  "version": "v0.8.1",
-  "asset_version": "0.8.1",
-  "build": "2026.08.18",
-  "data_schema_version": 3,
-  "update_strategy": "manifest-no-store+versioned-assets+pre-upgrade-user-snapshot"
+  "version": "v0.8.2",
+  "asset_version": "0.8.2",
+  "build": "2026.08.19",
+  "data_schema_version": 2,
+  "update_strategy": "manifest-no-store+versioned-assets+pre-upgrade-user-snapshot",
+  "recovery_release": true
 }
