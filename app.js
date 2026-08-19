@@ -2,7 +2,7 @@ const URL='https://fhjutbhyvaamzzsipwaa.supabase.co';
 const KEY='sb_publishable_Ytbw_MTkDIhZP1KerZ4bAw_P7XPwFH_';
 const db=window.createAtlasClient(URL,KEY);
 const CORE_LESSONS=window.ATLAS_CORE_LESSONS||{};
-const ATLAS_VERSION='v0.8.1',ATLAS_BUILD='2026.08.18',ATLAS_DATA_SCHEMA=3;
+const ATLAS_VERSION='v0.8.2',ATLAS_BUILD='2026.08.19',ATLAS_DATA_SCHEMA=3;
 window.addEventListener('error',e=>{
   const msg='Atlas hit an unexpected screen error. Your saved progress is not erased.';
   const status=document.getElementById('systemStatus'),auth=document.getElementById('authMessage');
@@ -57,7 +57,7 @@ async function checkForAtlasUpdate({showStatus=false}={}){
  }
 }
 
-let authMode='signup',user=null,profile=null,subjects=[],concepts=[],states=[],sessions=[],masteries=[],interests=[],prereqs=[],events=[],attempt=null,round=1,qIndex=0,answers=[],roundQs=[],openIndex=0,todayDone=new Set(),frontierConcept=null,currentRoute=null,deepDiveSubjectKey=null,todayPlan=[],dailySessionComplete=false,guidedSessionActive=false,taskOpenedAt=0,sessionActiveSeconds=0,activityBySubject={},activityByConcept={},misconceptions=[],modalityPerf=[],curiosityQueue=[],learningObjects=[],connections=[],milestones=[],curatedMedia=[],activeLearningObject=null,assessmentBusy=false,progressCache={},activeDiscovery=null,discoverySeen=new Set(),prefetchInFlight=new Set(),coreLoadWarning='',sessionArc=null,sessionMode='balanced',activeTutorSessionId=null,activeTutorState=null,openEvaluations=[];
+let authMode='signup',user=null,profile=null,subjects=[],concepts=[],states=[],sessions=[],masteries=[],interests=[],prereqs=[],events=[],attempt=null,round=1,qIndex=0,answers=[],roundQs=[],openIndex=0,todayDone=new Set(),frontierConcept=null,currentRoute=null,deepDiveSubjectKey=null,todayPlan=[],dailySessionComplete=false,guidedSessionActive=false,taskOpenedAt=0,sessionActiveSeconds=0,activityBySubject={},activityByConcept={},misconceptions=[],modalityPerf=[],curiosityQueue=[],learningObjects=[],connections=[],milestones=[],curatedMedia=[],activeLearningObject=null,assessmentBusy=false,progressCache={},activeDiscovery=null,discoverySeen=new Set(),prefetchInFlight=new Set(),coreLoadWarning='',sessionArc=null,sessionMode='balanced',activeTutorSessionId=null,activeTutorState=null,openEvaluations=[],teachingProviderReady=null;
 const VIEWS=['auth','onboarding','assessmentIntro','assessment','checkpoint','app'];
 const EXTRA=['Science','Health & Medicine','Trades & Construction','Business & Leadership','Accounting & Economics','Technology & AI','History & Geopolitics','Psychology & Philosophy','Arts & Culture'];
 
@@ -587,15 +587,56 @@ function pairKey(a,b){return [a,b].sort().join('|')}
 function arcTemplateForSubjects(a,b){return a&&b&&a!==b?ARC_PAIRS[pairKey(a,b)]||null:null}
 function conceptPairConnected(a,b){if(!a||!b)return false;if(a.subject_key===b.subject_key)return true;return !!arcTemplateForSubjects(a.subject_key,b.subject_key)}
 function subjectTeachingCandidate(subjectKey,exclude=new Set(),anchorLevel=null){
- let rows=concepts.filter(c=>c.subject_key===subjectKey&&!exclude.has(c.key)).map(c=>{let mode=subjectEvidence(subjectKey).confidence<35?'gap':'frontier',x=routeScore(c,mode);if(x.diagnostic)x.score=-9999;if(x.score>-9000){x.score+=(CORE_LESSONS[c.key]?45:0)+goalBoost(c)+teachingRampBonus(c);if(anchorLevel!=null)x.score+=Math.max(0,30-10*Math.abs((+c.level||1)-anchorLevel))}return x}).filter(x=>x.score>-9000).sort((a,b)=>b.score-a.score);return rows[0]||null
+ let rows=concepts.filter(c=>c.subject_key===subjectKey&&!exclude.has(c.key)&&teachableNow(c)).map(c=>{let mode=subjectEvidence(subjectKey).confidence<35?'gap':'frontier',x=routeScore(c,mode);if(x.diagnostic)x.score=-9999;if(x.score>-9000){x.score+=(CORE_LESSONS[c.key]?45:0)+goalBoost(c)+teachingRampBonus(c);if(anchorLevel!=null)x.score+=Math.max(0,30-10*Math.abs((+c.level||1)-anchorLevel))}return x}).filter(x=>x.score>-9000).sort((a,b)=>b.score-a.score);return rows[0]||null
 }
+
+function coreLessonAvailable(c){return !!(c&&CORE_LESSONS[c.key])}
+function teachableNow(c){return !!c&&(teachingProviderReady!==false||coreLessonAvailable(c))}
+async function checkTeachingProvider(){
+ try{
+   let cached=sessionStorage.getItem('atlas_teaching_provider_ready');
+   let checked=+sessionStorage.getItem('atlas_teaching_provider_checked_at')||0;
+   if(cached!==null&&Date.now()-checked<30*60*1000){teachingProviderReady=cached==='1';return teachingProviderReady}
+ }catch{}
+ try{
+   let probe={mode:'evaluate',subject:'Atlas system check',concept:'Teaching provider readiness',response_text:'Provider readiness check only.'};
+   let {data,error}=await db.functions.invoke('atlas-ai-content',{body:probe});
+   teachingProviderReady=!error&&!!data&&data.provider!=='atlas_fallback';
+ }catch{teachingProviderReady=false}
+ try{
+   sessionStorage.setItem('atlas_teaching_provider_ready',teachingProviderReady?'1':'0');
+   sessionStorage.setItem('atlas_teaching_provider_checked_at',String(Date.now()))
+ }catch{}
+ return teachingProviderReady
+}
+function nearestCoreLesson(subjectKey,preferredLevel=null,exclude=new Set()){
+ let rows=concepts.filter(c=>c.subject_key===subjectKey&&coreLessonAvailable(c)&&!exclude.has(c.key));
+ if(!rows.length)return null;
+ rows.sort((a,b)=>{
+   let ma=conceptMastery(a.key),mb=conceptMastery(b.key),ua=verifiedConcept(ma)?1:0,ub=verifiedConcept(mb)?1:0;
+   if(ua!==ub)return ua-ub;
+   if(preferredLevel!=null)return Math.abs((+a.level||1)-preferredLevel)-Math.abs((+b.level||1)-preferredLevel);
+   return (+a.level||1)-(+b.level||1)
+ });
+ return rows[0]
+}
+function providerStatusNote(){
+ if(teachingProviderReady!==false)return '';
+ return 'Live personalized generation is temporarily offline. Atlas is using its built-in Core curriculum so learning can continue.'
+}
+
 function primaryTeachingCandidate(exclude=new Set()){
- let goalMatches=concepts.map(c=>{let mode=subjectEvidence(c.subject_key).confidence<35?'gap':'frontier',x=routeScore(c,mode);if(x.diagnostic)x.score=-9999;x.score+=goalBoost(c)+(CORE_LESSONS[c.key]?35:0)+teachingRampBonus(c)+weeklyCoverageBoost(c);return x}).filter(x=>!exclude.has(x.c.key)&&x.score>-9000).sort((a,b)=>b.score-a.score);
- return goalMatches[0]||foundationTeachingCandidate(exclude)||pickCandidate('frontier',exclude)||pickCandidate('gap',exclude)
+ let goalMatches=concepts.filter(teachableNow).map(c=>{let mode=subjectEvidence(c.subject_key).confidence<35?'gap':'frontier',x=routeScore(c,mode);if(x.diagnostic)x.score=-9999;x.score+=goalBoost(c)+(CORE_LESSONS[c.key]?35:0)+teachingRampBonus(c)+weeklyCoverageBoost(c);return x}).filter(x=>!exclude.has(x.c.key)&&x.score>-9000).sort((a,b)=>b.score-a.score);
+ if(goalMatches[0])return goalMatches[0];
+ if(teachingProviderReady===false){
+   let c=concepts.filter(c=>coreLessonAvailable(c)&&!exclude.has(c.key)).sort((a,b)=>(verifiedConcept(conceptMastery(a.key))?1:0)-(verifiedConcept(conceptMastery(b.key))?1:0)||(+a.level||1)-(+b.level||1))[0];
+   return c?routeScore(c,'frontier'):null
+ }
+ return foundationTeachingCandidate(exclude)||pickCandidate('frontier',exclude)||pickCandidate('gap',exclude)
 }
 function coherentSecondary(primary,exclude=new Set(),deep=false){
  if(!primary)return null;let same=subjectTeachingCandidate(primary.c.subject_key,exclude,+primary.c.level||1);if(deep)return same;
- let cross=concepts.filter(c=>c.subject_key!==primary.c.subject_key&&!exclude.has(c.key)&&arcTemplateForSubjects(primary.c.subject_key,c.subject_key)).map(c=>{let mode=subjectEvidence(c.subject_key).confidence<35?'gap':'frontier',x=routeScore(c,mode);if(x.diagnostic)x.score=-9999;if(x.score>-9000)x.score+=goalBoost(c)+(CORE_LESSONS[c.key]?30:0)+teachingRampBonus(c)+18;return x}).filter(x=>x.score>-9000).sort((a,b)=>b.score-a.score)[0];
+ let cross=concepts.filter(c=>c.subject_key!==primary.c.subject_key&&!exclude.has(c.key)&&teachableNow(c)&&arcTemplateForSubjects(primary.c.subject_key,c.subject_key)).map(c=>{let mode=subjectEvidence(c.subject_key).confidence<35?'gap':'frontier',x=routeScore(c,mode);if(x.diagnostic)x.score=-9999;if(x.score>-9000)x.score+=goalBoost(c)+(CORE_LESSONS[c.key]?30:0)+teachingRampBonus(c)+18;return x}).filter(x=>x.score>-9000).sort((a,b)=>b.score-a.score)[0];
  if(cross&&cross.score>(same?.score||-9999)-5)return cross;return same||cross||null
 }
 function buildSessionArc(plan,mode='balanced'){
@@ -617,14 +658,36 @@ function chooseSessionPlan(mode='balanced'){
  if(design.synthesis){plan.push({type:'synthesis',route:{c:primary.c,score:0,reasons:['integrated application'],e:primary.e,m:primary.m,diagnostic:false},session_role:'synthesis'})}
  plan.forEach((p,i)=>p.estimated_minutes=stageEstimate(p.type,i,plan.length));sessionArc=buildSessionArc(plan,mode);sessionMode=mode;return plan
 }
+function renderAll(){
+ if(!todayPlan.length&&!dailySessionComplete)todayPlan=chooseSessionPlan();
+ renderLearnerSnapshot();
+ renderMap();
+ renderPortfolio();
+ renderForecast();
+ renderToday();
+ renderFrontier();
+ renderWeekly();
+ renderDiscovery();
+ renderExplore();
+ renderInsights();
+ renderBuild();
+ checkMilestones()
+}
+
 function nextIncompletePlanIndex(){for(let i=0;i<todayPlan.length;i++){let p=todayPlan[i],key=`${p.type}_${p.route.c.key}`;if(!todayDone.has(key))return i}return -1}
 async function startOrContinueDailySession(){
  if(dailySessionComplete)return;
  if(!todayPlan.length)todayPlan=chooseSessionPlan(sessionMode||'balanced');guidedSessionActive=true;await saveDailyProgress(false);renderToday();let i=nextIncompletePlanIndex();if(i>=0)openTask(i)
 }
 function bestDeepDiveConcept(subjectKey){
- let rows=concepts.filter(c=>c.subject_key===subjectKey).map(c=>routeScore(c,'frontier')).filter(x=>x.score>-9000).sort((a,b)=>b.score-a.score);
- return rows[0]||concepts.filter(c=>c.subject_key===subjectKey).map(c=>routeScore(c,'general')).sort((a,b)=>b.score-a.score)[0]||null
+ let pool=concepts.filter(c=>c.subject_key===subjectKey&&teachableNow(c));
+ let rows=pool.map(c=>routeScore(c,'frontier')).filter(x=>x.score>-9000).sort((a,b)=>b.score-a.score);
+ if(rows[0])return rows[0];
+ if(teachingProviderReady===false){
+   let c=nearestCoreLesson(subjectKey,subjectEvidence(subjectKey).boundary||1);
+   return c?routeScore(c,'general'):null
+ }
+ return pool.map(c=>routeScore(c,'general')).sort((a,b)=>b.score-a.score)[0]||null
 }
 function openDeepDiveForSubject(subjectKey,conceptKey=null){
  deepDiveSubjectKey=subjectKey||deepDiveSubjectKey||pickCandidate('frontier')?.c?.subject_key||subjects[0]?.key||null;
@@ -659,8 +722,22 @@ async function backfillOpenAssessmentEvaluations(){
 }
 async function loadApp(){
  show('app');$('logout').classList.remove('hidden');$('dailyMinutes').textContent=profile.daily_minutes;
- try{await loadCore();let retried=await retryPendingSessionSummary();if(retried)await loadCore();await syncStreakFromSessions();await restoreDailyProgress()}catch(err){setSystemStatus(err?.message||'Atlas could not load your learning map.','error');return}
- setSystemStatus(coreLoadWarning,coreLoadWarning?'warn':'');renderAll();
+ try{
+   await loadCore();
+   let retried=await retryPendingSessionSummary();if(retried)await loadCore();
+   await checkTeachingProvider();
+   await syncStreakFromSessions();
+   await restoreDailyProgress();
+   if(teachingProviderReady===false&&todayDone.size===0&&!dailySessionComplete&&todayPlan.some(p=>p.type==='lesson'&&!coreLessonAvailable(p.route.c))){
+     todayPlan=[];sessionArc=null;guidedSessionActive=false
+   }
+ }catch(err){setSystemStatus(err?.message||'Atlas could not load your learning map.','error');return}
+ try{
+   renderAll();
+   if(subjects.length&&$('mapItems')&&!$('mapItems').children.length)throw new Error('Knowledge Map did not render.');
+   if(subjects.length&&$('deepDiveSubject')&&!$('deepDiveSubject').options.length)throw new Error('Deep Dive subjects did not render.');
+ }catch(err){setSystemStatus(`Atlas UI recovery check failed: ${err?.message||'unknown render error'}`,'error');console.error(err);return}
+ setSystemStatus(coreLoadWarning||providerStatusNote(),coreLoadWarning?'warn':teachingProviderReady===false?'warn':'');
  if(localStorage.getItem('atlas_show_snapshot')==='1'){
   localStorage.removeItem('atlas_show_snapshot');let ranked=strengthEvidenceProfile(),top=ranked[0],second=ranked[1],top3=ranked.filter(x=>x.confidence>=32).slice(0,3),clear=!!(top&&top.confidence>=65&&top.evidencePoints>=4&&(!second||top.score-second.score>=7)),weak=ranked.filter(x=>x.e.confidence>=40).sort((a,b)=>a.e.ability-b.e.ability)[0],uncertain=subjects.map(s=>({s,e:subjectEvidence(s.key)})).filter(x=>x.e.confidence<35).slice(0,5),strengthText=clear?top.s.name:(top3.map(x=>x.s.name).join(' · ')||'still forming');
   $('modalBody').innerHTML=`<div class="eyebrow">YOUR FIRST KNOWLEDGE MAP</div><h2>Here’s what Atlas learned about you.</h2><p><strong>${clear?'Clearest demonstrated strength':'Strongest evidence so far'}:</strong> ${strengthText}.</p><p><strong>Lowest measured area with enough evidence:</strong> ${weak?.s.name||'not enough evidence yet'}.</p><p><strong>Still uncertain:</strong> ${uncertain.map(x=>x.s.name).join(', ')||'very little'}.</p><div class="notice">This is a starting model, not a permanent label. Atlas will keep refining it from what you actually demonstrate.</div><button id="snapshotContinue" class="primary">Start my first adaptive session</button>`;$('modal').classList.remove('hidden');$('snapshotContinue').onclick=()=>$('modal').classList.add('hidden')
